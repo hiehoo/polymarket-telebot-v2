@@ -1,0 +1,43 @@
+# Node modules
+node_modules
+npm-debug.log
+
+# Build artifacts
+dist
+build
+*.tsbuildinfo
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Development files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+logs
+*.log
+
+# Test files
+coverage
+.nyc_output
+tests
+
+# Git
+.git
+.gitignore
+
+# Documentation
+README.md
+docs
+
+# CI/CD
+.github
+
+# Cache
+.cache
+.parcel-cache
