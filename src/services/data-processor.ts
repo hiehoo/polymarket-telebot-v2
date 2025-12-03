@@ -645,8 +645,20 @@ export class DataProcessor extends EventEmitter implements QueueManager, EventPr
       return false;
     }
 
-    return this.retryPolicy.retryableErrors.some(errorType =>
-      event.error!.toLowerCase().includes(errorType)
+    // Default retryable error conditions if retryableErrors is not defined
+    const retryableErrors = this.retryPolicy.retryableErrors || [
+      'timeout',
+      'network',
+      'connection',
+      'socket',
+      'econnreset',
+      'enotfound',
+      'econnrefused',
+      'etimedout'
+    ];
+
+    return retryableErrors.some(errorType =>
+      event.error!.toLowerCase().includes(errorType.toLowerCase())
     );
   }
 

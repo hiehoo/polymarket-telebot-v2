@@ -433,7 +433,18 @@ export class PolymarketRestClient {
       }
     }
 
-    return retryPolicy.retryableErrors.some((code: string) =>
+    // Default retryable error conditions if retryableErrors is not defined
+    const retryableErrors = retryPolicy.retryableErrors || [
+      'ECONNRESET',
+      'ENOTFOUND',
+      'ECONNREFUSED',
+      'ETIMEDOUT',
+      'EAI_AGAIN',
+      'socket hang up',
+      'network timeout'
+    ];
+
+    return retryableErrors.some((code: string) =>
       error.message.includes(code) || error.message.toLowerCase().includes('timeout')
     );
   }
