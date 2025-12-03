@@ -35,6 +35,7 @@ export interface PolymarketCondition {
   id: string;
   question: string;
   title?: string;
+  slug?: string;
   description: string;
   outcomes: string[];
   outcome?: string;

@@ -597,7 +597,27 @@ bot.command('positions', async (ctx) => {
 
     await ctx.reply('🔍 Fetching wallet positions and market data...');
 
-    const positions = await polymarketService.getWalletPositionsWithMarketData(walletAddress);
+    const allPositions = await polymarketService.getWalletPositionsWithMarketData(walletAddress);
+
+    // Filter to only show active (non-resolved) markets
+    const positions = allPositions.filter(position => !position.marketData?.resolved);
+
+    if (positions.length === 0) {
+      const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
+
+      // Check if there were positions but all were resolved
+      if (allPositions.length > 0) {
+        ctx.reply(
+          `📋 **Wallet Positions**\n\n` +
+          `**Address:** \`${shortAddress}\`\n\n` +
+          `_No active positions found._\n\n` +
+          `This wallet has ${allPositions.length} resolved position(s) but no active positions.\n` +
+          `Only active markets are displayed.`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+    }
 
     if (positions.length === 0) {
       const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
@@ -622,59 +642,35 @@ bot.command('positions', async (ctx) => {
     let totalPnL = 0;
 
     positions.slice(0, 10).forEach((position, index) => {
-      // Ensure we have valid data to display
-      const displayMarket = position.market || `Prediction Market ${position.marketId.substring(0, 8)}`;
+      // Get essential data
+      const displayMarket = position.marketData?.question || position.market || `Market ${position.marketId.substring(0, 8)}`;
       const displayPosition = position.position || 'UNKNOWN';
       const displayShares = isNaN(position.shares) ? 0 : position.shares;
       const displayValue = isNaN(position.value) ? 0 : position.value;
-      const displayPnL = isNaN(position.pnl) ? 0 : position.pnl;
 
-      positionsMessage += `${index + 1}. **${displayMarket}**\n`;
-      positionsMessage += `   🎯 Position: ${displayPosition}\n`;
-      positionsMessage += `   📈 Shares: ${displayShares.toFixed(2)}\n`;
-      positionsMessage += `   💰 Value: $${displayValue.toFixed(2)}\n`;
+      // Create search link using slug or question
+      const marketSlug = position.marketData?.slug || position.marketData?.question || displayMarket;
+      const searchQuery = encodeURIComponent(marketSlug);
+      const marketLink = `https://polymarket.com/search?q=${searchQuery}`;
 
-      const pnlEmoji = displayPnL >= 0 ? '🟢' : '🔴';
-      const pnlSign = displayPnL >= 0 ? '+' : '';
-      positionsMessage += `   ${pnlEmoji} P&L: ${pnlSign}$${displayPnL.toFixed(2)}\n`;
-
-      // Add market data if available
-      if (position.marketData) {
-        const market = position.marketData;
-        const volume = market.volume ? `$${(market.volume / 1000).toFixed(0)}K` : 'N/A';
-        const liquidity = market.liquidity ? `$${(market.liquidity / 1000).toFixed(0)}K` : 'N/A';
-        const endDate = market.endDate ? new Date(market.endDate).toLocaleDateString() : 'TBA';
-        const status = market.resolved ? '✅ Resolved' : '🟡 Active';
-
-        positionsMessage += `   💧 Liquidity: ${liquidity}\n`;
-        positionsMessage += `   💰 Volume: ${volume}\n`;
-        positionsMessage += `   📅 Ends: ${endDate}\n`;
-        positionsMessage += `   🎯 Status: ${status}\n`;
-        positionsMessage += `   🔗 Market ID: \`${market.id}\`\n`;
-      } else {
-        positionsMessage += `   📊 Market ID: \`${position.marketId}\`\n`;
+      // Format end date as short format
+      let endInfo = '';
+      if (position.marketData?.endDate) {
+        const endDate = new Date(position.marketData.endDate);
+        const shortEndDate = endDate.toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' });
+        endInfo = ` | Ends ${shortEndDate}`;
       }
 
-      positionsMessage += '\n';
+      // Concise single-line format per position
+      positionsMessage += `${index + 1}. [${displayMarket}](${marketLink})\n`;
+      positionsMessage += `   ${displayPosition} | ${displayShares.toFixed(0)} shares @ $${displayValue.toFixed(2)}${endInfo}\n\n`;
 
       totalValue += displayValue;
-      totalPnL += displayPnL;
     });
 
-    const totalPnLEmoji = totalPnL >= 0 ? '🟢' : '🔴';
-    const totalPnLSign = totalPnL >= 0 ? '+' : '';
-
-    const positionsWithMarketData = positions.filter(p => p.marketData);
-
-    positionsMessage += `📊 **Summary:**\n`;
-    positionsMessage += `• Total Positions: ${positions.length}\n`;
-    positionsMessage += `• Portfolio Value: $${totalValue.toFixed(2)}\n`;
-    positionsMessage += `• ${totalPnLEmoji} Total P&L: ${totalPnLSign}$${totalPnL.toFixed(2)}\n`;
-    positionsMessage += `• Market Data: ${positionsWithMarketData.length}/${positions.length} enriched`;
-
-    if (positions.length > 10) {
-      positionsMessage += `\n\n_Showing top 10 positions_`;
-    }
+    // Simple summary
+    const showingText = positions.length > 10 ? ` (showing 10/${positions.length})` : '';
+    positionsMessage += `💼 ${positions.length} active positions${showingText} | $${totalValue.toFixed(2)} total`;
 
     ctx.reply(positionsMessage, { parse_mode: 'Markdown' });
 

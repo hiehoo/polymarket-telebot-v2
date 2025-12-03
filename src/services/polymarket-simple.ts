@@ -11,6 +11,7 @@ interface MarketData {
   liquidity: number;
   endDate: string;
   resolved: boolean;
+  slug?: string;
 }
 
 interface WalletPosition {
