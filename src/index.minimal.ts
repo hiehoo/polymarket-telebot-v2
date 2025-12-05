@@ -622,40 +622,36 @@ bot.command('positions', async (ctx) => {
     let totalPnL = 0;
 
     positions.slice(0, 10).forEach((position, index) => {
-      // Ensure we have valid data to display
-      const displayMarket = position.market || `Prediction Market ${position.marketId.substring(0, 8)}`;
-      const displayPosition = position.position || 'UNKNOWN';
+      const displayMarket = position.market || `Market ${position.marketId.substring(0, 8)}`;
+      const displayPosition = position.position || '?';
       const displayShares = isNaN(position.shares) ? 0 : position.shares;
       const displayValue = isNaN(position.value) ? 0 : position.value;
       const displayPnL = isNaN(position.pnl) ? 0 : position.pnl;
+      const entryPrice = position.entryPrice || 0;
 
-      positionsMessage += `${index + 1}. **${displayMarket}**\n`;
-      positionsMessage += `   🎯 Position: ${displayPosition}\n`;
-      positionsMessage += `   📈 Shares: ${displayShares.toFixed(2)}\n`;
-      positionsMessage += `   💰 Value: $${displayValue.toFixed(2)}\n`;
+      // Build market URL
+      const marketUrl = position.eventSlug
+        ? `https://polymarket.com/event/${position.eventSlug}`
+        : position.slug
+          ? `https://polymarket.com/event/${position.slug}`
+          : null;
 
+      // Title with hyperlink
+      const titleWithLink = marketUrl
+        ? `[${displayMarket}](${marketUrl})`
+        : displayMarket;
+
+      // End date
+      const endDate = position.marketData?.endDate
+        ? new Date(position.marketData.endDate).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric' })
+        : 'TBA';
+
+      // P&L formatting
       const pnlEmoji = displayPnL >= 0 ? '🟢' : '🔴';
       const pnlSign = displayPnL >= 0 ? '+' : '';
-      positionsMessage += `   ${pnlEmoji} P&L: ${pnlSign}$${displayPnL.toFixed(2)}\n`;
 
-      // Add market data if available
-      if (position.marketData) {
-        const market = position.marketData;
-        const volume = market.volume ? `$${(market.volume / 1000).toFixed(0)}K` : 'N/A';
-        const liquidity = market.liquidity ? `$${(market.liquidity / 1000).toFixed(0)}K` : 'N/A';
-        const endDate = market.endDate ? new Date(market.endDate).toLocaleDateString() : 'TBA';
-        const status = market.resolved ? '✅ Resolved' : '🟡 Active';
-
-        positionsMessage += `   💧 Liquidity: ${liquidity}\n`;
-        positionsMessage += `   💰 Volume: ${volume}\n`;
-        positionsMessage += `   📅 Ends: ${endDate}\n`;
-        positionsMessage += `   🎯 Status: ${status}\n`;
-        positionsMessage += `   🔗 Market ID: \`${market.id}\`\n`;
-      } else {
-        positionsMessage += `   📊 Market ID: \`${position.marketId}\`\n`;
-      }
-
-      positionsMessage += '\n';
+      positionsMessage += `${index + 1}. ${titleWithLink}\n`;
+      positionsMessage += `   ${displayPosition} | ${displayShares.toFixed(0)} shares @ $${entryPrice.toFixed(2)} | Value: $${displayValue.toFixed(2)} | ${pnlEmoji} ${pnlSign}$${displayPnL.toFixed(2)} | Ends ${endDate}\n\n`;
 
       totalValue += displayValue;
       totalPnL += displayPnL;
@@ -664,16 +660,10 @@ bot.command('positions', async (ctx) => {
     const totalPnLEmoji = totalPnL >= 0 ? '🟢' : '🔴';
     const totalPnLSign = totalPnL >= 0 ? '+' : '';
 
-    const positionsWithMarketData = positions.filter(p => p.marketData);
-
-    positionsMessage += `📊 **Summary:**\n`;
-    positionsMessage += `• Total Positions: ${positions.length}\n`;
-    positionsMessage += `• Portfolio Value: $${totalValue.toFixed(2)}\n`;
-    positionsMessage += `• ${totalPnLEmoji} Total P&L: ${totalPnLSign}$${totalPnL.toFixed(2)}\n`;
-    positionsMessage += `• Market Data: ${positionsWithMarketData.length}/${positions.length} enriched`;
+    positionsMessage += `💼 ${positions.length} positions | Value: $${totalValue.toFixed(2)} | ${totalPnLEmoji} ${totalPnLSign}$${totalPnL.toFixed(2)}`;
 
     if (positions.length > 10) {
-      positionsMessage += `\n\n_Showing top 10 positions_`;
+      positionsMessage += ` | _Showing top 10_`;
     }
 
     ctx.reply(positionsMessage, { parse_mode: 'Markdown' });

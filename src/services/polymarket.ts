@@ -47,6 +47,10 @@ interface WalletPosition {
   pnl: number;
   entryPrice?: number;
   marketData?: MarketData;
+  // URL-related fields from Data API
+  slug?: string;
+  eventSlug?: string;
+  title?: string;
 }
 
 interface ServiceStats {
@@ -245,22 +249,28 @@ export class PolymarketService extends EventEmitter {
     }
   }
 
-  async getWalletPositions(walletAddress: string): Promise<WalletPosition[]> {
+  async getWalletPositions(walletAddress: string, limit = 500): Promise<WalletPosition[]> {
     try {
       const startTime = Date.now();
 
       const positions = await this.restClient.getPositions({
-        user: walletAddress
+        user: walletAddress,
+        limit,
+        sizeThreshold: 0.01 // Filter out resolved/empty positions
       });
 
       const walletPositions: WalletPosition[] = positions.map(position => ({
         marketId: position.conditionId,
-        market: position.conditionId, // Will be enriched with market data
+        market: position.title || position.conditionId, // Use title from Data API
         position: position.side || position.outcome || 'UNKNOWN',
         shares: position.size || 0,
-        value: (position.price || 0) * (position.size || 0),
-        pnl: 0, // Will be calculated with market data
-        entryPrice: position.price || 0 // Store entry price for P&L calculation
+        value: position.currentValue || (position.price || 0) * (position.size || 0),
+        pnl: position.cashPnl || 0, // Use P&L from Data API
+        entryPrice: position.avgPrice || position.price || 0,
+        // URL-related fields from Data API
+        slug: position.slug,
+        eventSlug: position.eventSlug,
+        title: position.title
       }));
 
       this.recordRequestTime(Date.now() - startTime);
@@ -309,9 +319,9 @@ export class PolymarketService extends EventEmitter {
 
             return {
               ...position,
-              market: marketData?.question || position.marketId,
-              value: updatedValue,
-              pnl: calculatedPnl,
+              market: position.title || marketData?.question || position.marketId,
+              value: position.value > 0 ? position.value : updatedValue, // Prefer Data API value
+              pnl: position.pnl !== 0 ? position.pnl : calculatedPnl, // Prefer Data API P&L
               marketData
             };
           } catch (error) {

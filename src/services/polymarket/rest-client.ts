@@ -731,6 +731,7 @@ export class PolymarketRestClient {
     status?: string;
     limit?: number;
     offset?: number;
+    sizeThreshold?: number;
   }): Promise<PolymarketPosition[]> {
     try {
       const queryParams: any = {};
@@ -749,6 +750,9 @@ export class PolymarketRestClient {
       }
       if (params?.offset) {
         queryParams.offset = params.offset;
+      }
+      if (params?.sizeThreshold !== undefined) {
+        queryParams.sizeThreshold = params.sizeThreshold;
       }
 
       const response = await this.executeWithRetry(() =>
@@ -771,6 +775,7 @@ export class PolymarketRestClient {
     status?: string;
     limit?: number;
     offset?: number;
+    sizeThreshold?: number;
   }): Promise<PolymarketPosition[]> {
     const cacheKey = await this.getCacheKey('positions', params);
 

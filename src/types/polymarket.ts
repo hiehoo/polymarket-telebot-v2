@@ -12,6 +12,29 @@ export interface PolymarketPosition {
   payouts?: Record<string, number>;
   probability?: number;
   liquidity?: number;
+  // Data API fields
+  proxyWallet?: string;
+  asset?: string;
+  avgPrice?: number;
+  initialValue?: number;
+  currentValue?: number;
+  cashPnl?: number;
+  percentPnl?: number;
+  totalBought?: number;
+  realizedPnl?: number;
+  percentRealizedPnl?: number;
+  curPrice?: number;
+  redeemable?: boolean;
+  mergeable?: boolean;
+  title?: string;
+  slug?: string;
+  icon?: string;
+  eventSlug?: string;
+  outcomeIndex?: number;
+  oppositeOutcome?: string;
+  oppositeAsset?: string;
+  endDate?: string;
+  negativeRisk?: boolean;
 }
 
 export interface PolymarketTransaction {
