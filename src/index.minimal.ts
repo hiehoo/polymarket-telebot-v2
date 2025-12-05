@@ -597,7 +597,27 @@ bot.command('positions', async (ctx) => {
 
     await ctx.reply('🔍 Fetching wallet positions and market data...');
 
-    const positions = await polymarketService.getWalletPositionsWithMarketData(walletAddress);
+    const allPositions = await polymarketService.getWalletPositionsWithMarketData(walletAddress);
+
+    // Filter to only show active (non-resolved) markets
+    const positions = allPositions.filter(position => !position.marketData?.resolved);
+
+    if (positions.length === 0) {
+      const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
+
+      // Check if there were positions but all were resolved
+      if (allPositions.length > 0) {
+        ctx.reply(
+          `📋 **Wallet Positions**\n\n` +
+          `**Address:** \`${shortAddress}\`\n\n` +
+          `_No active positions found._\n\n` +
+          `This wallet has ${allPositions.length} resolved position(s) but no active positions.\n` +
+          `Only active markets are displayed.`,
+          { parse_mode: 'Markdown' }
+        );
+        return;
+      }
+    }
 
     if (positions.length === 0) {
       const shortAddress = `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`;
@@ -629,7 +649,7 @@ bot.command('positions', async (ctx) => {
       const displayPnL = isNaN(position.pnl) ? 0 : position.pnl;
       const entryPrice = position.entryPrice || 0;
 
-      // Build market URL
+      // Build market URL using eventSlug from Data API
       const marketUrl = position.eventSlug
         ? `https://polymarket.com/event/${position.eventSlug}`
         : position.slug
