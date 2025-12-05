@@ -19,10 +19,14 @@ export class SimpleRedisClient extends EventEmitter {
         url: redisConfig.url?.replace(/\/\/.*@/, '//***@'),
       });
 
-      this.client = new Redis(redisConfig.url || {
-        host: 'localhost',
-        port: 6379,
-      });
+      if (redisConfig.url) {
+        this.client = new Redis(redisConfig.url);
+      } else {
+        this.client = new Redis({
+          host: 'localhost',
+          port: 6379,
+        });
+      }
 
       this.client.on('connect', () => {
         logger.info('Redis connected');
@@ -344,8 +348,10 @@ export class SimpleRedisClient extends EventEmitter {
 
   async scan(cursor: string, pattern?: string): Promise<[string, string[]]> {
     try {
-      const args = pattern ? [cursor, 'MATCH', pattern] : [cursor];
-      return await this.getClient().scan(...args);
+      if (pattern) {
+        return await this.getClient().scan(cursor, 'MATCH', pattern);
+      }
+      return await this.getClient().scan(cursor);
     } catch (error) {
       logger.error('Redis SCAN failed', { cursor, pattern, error });
       throw error;
