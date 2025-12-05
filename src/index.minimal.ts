@@ -7,6 +7,8 @@ import { logger } from './utils/logger';
 import { UserService } from './services/database/user-service';
 import databasePool from './services/database/connection-pool';
 import { PolymarketService, createPolymarketService } from './services/polymarket';
+import { simpleRedisClient } from './services/redis';
+import { WalletActivityTracker, createWalletActivityTracker } from './services/wallet-tracker';
 
 // Validate configuration on startup
 try {
@@ -24,6 +26,9 @@ const polymarketService = createPolymarketService({
   enableCaching: true,
   enableMetrics: true
 });
+
+// Wallet Activity Tracker (initialized in startBot)
+let walletTracker: WalletActivityTracker | null = null;
 
 // Setup service event listeners
 polymarketService.on('websocket:connected', () => {
@@ -45,6 +50,7 @@ polymarketService.on('realtime:event', (event) => {
 // Setup graceful shutdown
 process.on('SIGINT', async () => {
   logger.info('Received SIGINT, shutting down gracefully...');
+  if (walletTracker) await walletTracker.shutdown();
   await polymarketService.shutdown();
   await bot.stop();
   process.exit(0);
@@ -52,6 +58,7 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM, shutting down gracefully...');
+  if (walletTracker) await walletTracker.shutdown();
   await polymarketService.shutdown();
   await bot.stop();
   process.exit(0);
@@ -163,12 +170,18 @@ bot.command('status', async (ctx) => {
       ? `${stats.cacheHitRate.toFixed(1)}%`
       : 'N/A';
 
+    // Wallet tracker status
+    const trackerStatus = walletTracker?.getStatus();
+    const trackerEmoji = trackerStatus?.enabled ? '🟢' : '🔴';
+    const trackerConnected = trackerStatus?.enabled ? '✅ Active' : '❌ Disabled';
+
     const statusMessage =
       `${polymarketEmoji} **Enhanced Bot Status**\n\n` +
       '🔗 **Connections:**\n' +
       '• ✅ Telegram: Connected\n' +
       `• ${polymarketHealth ? '✅' : '❌'} Polymarket REST: ${polymarketStatus}\n` +
       `• ${wsEmoji} WebSocket: ${wsStatus}\n` +
+      `• ${trackerEmoji} Activity Tracker: ${trackerConnected}` + (trackerStatus ? ` (${trackerStatus.trackedWallets} wallets)` : '') + '\n' +
       '• 💾 Database: Ready (In-memory)\n\n' +
       '📊 **Performance Metrics:**\n' +
       `• 📈 Success Rate: ${successRate}%\n` +
@@ -181,7 +194,7 @@ bot.command('status', async (ctx) => {
       '• ✅ Automatic Rate Limiting\n' +
       '• ✅ Multi-level Caching\n' +
       '• ✅ Real-time WebSocket Streaming\n' +
-      '• ✅ Advanced Error Recovery\n' +
+      '• ✅ Wallet Activity Notifications\n' +
       '• ✅ Performance Monitoring\n\n' +
       '💡 **Available Commands:**\n' +
       '• Wallet tracking & monitoring\n' +
@@ -288,16 +301,30 @@ bot.command('track', async (ctx) => {
         `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` :
         walletAddress;
 
+      // Start activity tracking if tracker is available
+      let activityTrackingStatus = '';
+      if (walletTracker && ctx.chat?.id) {
+        const trackResult = await walletTracker.startTracking(
+          walletAddress,
+          ctx.from.id,
+          ctx.chat.id
+        );
+        activityTrackingStatus = trackResult.success
+          ? '\n🔔 **Activity Notifications:** Enabled'
+          : '\n⚠️ Activity notifications: ' + trackResult.message;
+      }
+
       ctx.reply(
         `✅ **Wallet Tracking Added**\n\n` +
         `📍 Address: \`${shortAddress}\`\n` +
         `🔗 Network: ${addressType}\n` +
         `📊 Status: Active monitoring\n` +
-        `📅 Added: ${new Date().toLocaleDateString()}\n\n` +
+        `📅 Added: ${new Date().toLocaleDateString()}` +
+        activityTrackingStatus + `\n\n` +
         `🔔 You'll receive notifications for:\n` +
-        `• Transaction activity\n` +
-        `• Position changes\n` +
-        `• Market events\n\n` +
+        `• Buy/Sell position changes\n` +
+        `• New positions opened\n` +
+        `• Positions closed\n\n` +
         `Use /list to see all tracked wallets`,
         { parse_mode: 'Markdown' }
       );
@@ -413,6 +440,11 @@ bot.command(['untrack', 'remove'], async (ctx) => {
       const shortAddress = walletAddress.length > 20 ?
         `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` :
         walletAddress;
+
+      // Stop activity tracking if tracker is available
+      if (walletTracker) {
+        await walletTracker.stopTracking(walletAddress, ctx.from.id);
+      }
 
       ctx.reply(
         `✅ **Wallet Removed**\n\n` +
@@ -926,9 +958,33 @@ bot.on('message', (ctx) => {
 // Start the bot
 async function startBot() {
   try {
+    // Connect Redis
+    try {
+      await simpleRedisClient.connect();
+      logger.info('✅ Redis connected');
+    } catch (redisError) {
+      logger.warn('⚠️ Redis connection failed, wallet activity tracking will be disabled:', redisError);
+    }
+
     // Connect Polymarket service
     await polymarketService.connect();
     logger.info('✅ Polymarket service connected');
+
+    // Initialize Wallet Activity Tracker (if Redis is connected)
+    if (simpleRedisClient.isClientConnected()) {
+      walletTracker = createWalletActivityTracker({
+        redis: simpleRedisClient,
+        polymarketService,
+        bot,
+        pollIntervalMs: 60000, // 60 seconds
+        maxWallets: 100,
+        enabled: true,
+      });
+      await walletTracker.initialize();
+      logger.info('✅ Wallet Activity Tracker initialized');
+    } else {
+      logger.warn('⚠️ Wallet Activity Tracker disabled (Redis not available)');
+    }
 
     // Launch Telegram bot
     await bot.launch();
@@ -941,6 +997,7 @@ async function startBot() {
 
   } catch (error) {
     logger.error('Failed to start bot:', error);
+    if (walletTracker) await walletTracker.shutdown();
     await polymarketService.shutdown();
     process.exit(1);
   }
