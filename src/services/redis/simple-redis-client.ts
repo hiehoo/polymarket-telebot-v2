@@ -9,6 +9,10 @@ import { logger } from '@/utils/logger';
 import { AppError, ErrorType } from '@/utils/error-handler';
 import { redisConfig } from '@/config/redis';
 
+// Maximum retry attempts before giving up
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1000;
+
 export class SimpleRedisClient extends EventEmitter {
   private client: Redis | null = null;
   private isConnected = false;
@@ -19,12 +23,37 @@ export class SimpleRedisClient extends EventEmitter {
         url: redisConfig.url?.replace(/\/\/.*@/, '//***@'),
       });
 
+      // Build connection options with retry strategy for sleeping databases
+      const connectionOptions: any = {
+        maxRetriesPerRequest: 3,
+        enableOfflineQueue: false, // Don't queue commands when disconnected
+        connectTimeout: 10000,
+        commandTimeout: 5000,
+        retryStrategy: (times: number) => {
+          if (times > MAX_RETRY_ATTEMPTS) {
+            logger.warn(`Redis retry limit reached (${MAX_RETRY_ATTEMPTS} attempts), giving up`);
+            return null; // Stop retrying
+          }
+          const delay = Math.min(times * RETRY_DELAY_MS, 3000);
+          logger.info(`Redis connection attempt ${times}, retrying in ${delay}ms...`);
+          return delay;
+        },
+        reconnectOnError: (err: Error) => {
+          const targetError = 'READONLY';
+          if (err.message.includes(targetError)) {
+            return true; // Reconnect for READONLY errors
+          }
+          return false;
+        },
+      };
+
       if (redisConfig.url) {
-        this.client = new Redis(redisConfig.url);
+        this.client = new Redis(redisConfig.url, connectionOptions);
       } else {
         this.client = new Redis({
           host: 'localhost',
           port: 6379,
+          ...connectionOptions,
         });
       }
 
