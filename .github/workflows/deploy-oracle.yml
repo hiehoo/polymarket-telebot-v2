@@ -18,8 +18,8 @@ jobs:
           script: |
             cd ~/PolyBot
             git pull origin main
-            docker-compose down
-            docker-compose up -d --build
-            sleep 10
-            docker-compose ps
+            podman-compose down
+            podman-compose up -d --build
+            sleep 15
+            podman-compose ps
             echo "Deployment completed at $(date)"

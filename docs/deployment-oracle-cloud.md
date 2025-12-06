@@ -73,8 +73,22 @@ ssh -i /path/to/your-private-key opc@<YOUR_VM_PUBLIC_IP>
 
 ---
 
-## Step 5: Install Docker
+## Step 5: Install Podman (Recommended for Oracle Linux)
 
+Oracle Linux comes with Podman pre-installed. Just install podman-compose:
+
+```bash
+# Update system
+sudo dnf update -y
+
+# Install podman-compose
+sudo dnf install -y podman-compose git
+
+# Enable podman socket (for docker-compose compatibility)
+systemctl --user enable --now podman.socket
+```
+
+**Alternative: Install Docker (Ubuntu only)**
 ```bash
 # Update system
 sudo apt update && sudo apt upgrade -y
@@ -134,14 +148,14 @@ LOG_LEVEL=info
 ## Step 7: Start the Bot
 
 ```bash
-# Build and start all services
-docker-compose up -d --build
+# Build and start all services (use podman-compose on Oracle Linux)
+podman-compose up -d --build
 
 # Check logs
-docker-compose logs -f polymarket-telebot
+podman-compose logs -f polymarket-telebot
 
 # Check status
-docker-compose ps
+podman-compose ps
 ```
 
 ---
@@ -149,27 +163,23 @@ docker-compose ps
 ## Step 8: Set Up Auto-Start on Reboot
 
 ```bash
-# Enable Docker to start on boot
-sudo systemctl enable docker
-
-# Create systemd service for docker-compose
+# Create systemd service for podman-compose
 sudo nano /etc/systemd/system/polybot.service
 ```
 
 Add this content:
 ```ini
 [Unit]
-Description=PolyBot Docker Compose
-Requires=docker.service
-After=docker.service
+Description=PolyBot Podman Compose
+After=network-online.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-WorkingDirectory=/home/ubuntu/PolyBot
-ExecStart=/usr/local/bin/docker-compose up -d
-ExecStop=/usr/local/bin/docker-compose down
-User=ubuntu
+WorkingDirectory=/home/opc/PolyBot
+ExecStart=/usr/bin/podman-compose up -d
+ExecStop=/usr/bin/podman-compose down
+User=opc
 
 [Install]
 WantedBy=multi-user.target
@@ -177,6 +187,7 @@ WantedBy=multi-user.target
 
 Enable it:
 ```bash
+sudo systemctl daemon-reload
 sudo systemctl enable polybot
 sudo systemctl start polybot
 ```
@@ -223,16 +234,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           script: |
-            cd /home/ubuntu/PolyBot
+            cd ~/PolyBot
             git pull origin main
-            docker-compose down
-            docker-compose up -d --build
+            podman-compose down
+            podman-compose up -d --build
 ```
 
 Add these secrets in GitHub repo settings:
@@ -246,19 +257,19 @@ Add these secrets in GitHub repo settings:
 
 ```bash
 # View logs
-docker-compose logs -f polymarket-telebot
+podman-compose logs -f polymarket-telebot
 
 # Restart bot
-docker-compose restart polymarket-telebot
+podman-compose restart polymarket-telebot
 
 # Update and redeploy
-git pull && docker-compose up -d --build
+git pull && podman-compose up -d --build
 
 # Check resource usage
-docker stats
+podman stats
 
 # Backup database
-docker exec polymarket-postgres pg_dump -U polybot polybot > backup.sql
+podman exec polymarket-postgres pg_dump -U hiehoo polybot > backup.sql
 ```
 
 ---
@@ -272,21 +283,21 @@ docker exec polymarket-postgres pg_dump -U polybot polybot > backup.sql
 
 ### Bot not starting
 ```bash
-docker-compose logs polymarket-telebot
+podman-compose logs polymarket-telebot
 ```
 
 ### Redis/Postgres connection issues
 ```bash
 # Check if services are running
-docker-compose ps
+podman-compose ps
 
 # Restart all services
-docker-compose down && docker-compose up -d
+podman-compose down && podman-compose up -d
 ```
 
 ### Out of memory
 - ARM VMs have 12GB RAM, should be plenty
-- Check with `free -h` and `docker stats`
+- Check with `free -h` and `podman stats`
 
 ---
 
