@@ -64,6 +64,17 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
+// Global error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', { error: error.message, stack: error.stack });
+  // Don't exit - let the bot continue running
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection:', { reason, promise });
+  // Don't exit - let the bot continue running
+});
+
 // Basic middleware
 bot.use(async (ctx, next) => {
   const start = Date.now();
@@ -333,7 +344,7 @@ bot.command('track', async (ctx) => {
   }
 });
 
-bot.command('list', async (ctx) => {
+bot.command(['list', 'list_traders', 'wallets'], async (ctx) => {
   if (!ctx.from?.id) {
     ctx.reply('❌ Unable to identify user. Please try again.');
     return;
