@@ -110,35 +110,25 @@ bot.start((ctx) => {
 
 bot.help((ctx) => {
   ctx.reply(
-    '📋 **Enhanced Polymarket Bot**\n\n' +
-    '🔍 **Wallet Tracking**\n' +
-    '/track <0x...> - Track wallet activity\n' +
-    '/untrack <0x...> - Stop tracking wallet\n' +
-    '/list - Show tracked wallets\n\n' +
-    '📈 **Market Data & Analytics**\n' +
-    '/markets - View trending markets\n' +
-    '/market <id> - Get market details\n' +
-    '/positions <0x...> - Check wallet positions (with enriched data)\n' +
-    '/orderbook <market_id> - Real-time order book analysis\n' +
-    '/analytics <0x...> - Comprehensive wallet analytics\n\n' +
-    '⚡ **Real-time Features**\n' +
-    '/alerts - Manage notification alerts\n' +
-    '/mute - Temporarily mute notifications\n' +
-    '/unmute - Enable notifications\n\n' +
-    '⚙️ **System & Performance**\n' +
-    '/settings - Configure preferences\n' +
-    '/status - Enhanced system status with metrics\n\n' +
-    '🚀 **New Advanced Features:**\n' +
-    '• ✅ Circuit breaker protection\n' +
-    '• ✅ Automatic rate limiting\n' +
-    '• ✅ Multi-level caching\n' +
-    '• ✅ Real-time WebSocket streaming\n' +
-    '• ✅ Advanced error recovery\n' +
-    '• ✅ Performance monitoring\n' +
-    '• ✅ Order book analysis\n' +
-    '• ✅ Portfolio analytics\n\n' +
-    '💡 **Enterprise-grade Polymarket integration!**',
-    { parse_mode: 'Markdown' }
+    '📋 *Enhanced Polymarket Bot*\n\n' +
+    '🔍 *Wallet Tracking*\n' +
+    '/track `0x...` \\- Track wallet activity\n' +
+    '/untrack `0x...` \\- Stop tracking wallet\n' +
+    '/list \\- Show tracked wallets\n\n' +
+    '📈 *Market Data & Analytics*\n' +
+    '/markets \\- View trending markets\n' +
+    '/market `id` \\- Get market details\n' +
+    '/positions `0x...` \\- Check wallet positions\n' +
+    '/orderbook `market_id` \\- Real\\-time order book\n' +
+    '/analytics `0x...` \\- Wallet analytics\n\n' +
+    '⚡ *Real\\-time Features*\n' +
+    '/alerts \\- Manage notification alerts\n' +
+    '/mute \\- Temporarily mute notifications\n' +
+    '/unmute \\- Enable notifications\n\n' +
+    '⚙️ *System & Performance*\n' +
+    '/settings \\- Configure preferences\n' +
+    '/status \\- System status with metrics',
+    { parse_mode: 'MarkdownV2' }
   );
 });
 

@@ -9,21 +9,21 @@ services:
       - .env.prod.local
     environment:
       NODE_ENV: production
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      POLYMARKET_API_KEY: ${POLYMARKET_API_KEY}
-      POLYMARKET_API_URL: ${POLYMARKET_API_URL}
-      POLYMARKET_GAMMA_API_URL: ${POLYMARKET_GAMMA_API_URL}
-      POLYMARKET_DATA_API_URL: ${POLYMARKET_DATA_API_URL}
-      POLYMARKET_WS_URL: ${POLYMARKET_WS_URL}
-      DATABASE_URL: postgresql://polybot:${POSTGRES_PASSWORD}@postgres:5432/polybot
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET}
-      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
-      CLOB_AUTH_KEY: ${CLOB_AUTH_KEY}
-      CLOB_AUTH_SECRET: ${CLOB_AUTH_SECRET}
-      CLOB_AUTH_PASSPHRASE: ${CLOB_AUTH_PASSPHRASE}
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      POLYMARKET_API_KEY: "${POLYMARKET_API_KEY}"
+      POLYMARKET_API_URL: "${POLYMARKET_API_URL:-https://clob.polymarket.com}"
+      POLYMARKET_GAMMA_API_URL: "${POLYMARKET_GAMMA_API_URL:-https://gamma-api.polymarket.com}"
+      POLYMARKET_DATA_API_URL: "${POLYMARKET_DATA_API_URL:-https://data-api.polymarket.com}"
+      POLYMARKET_WS_URL: "${POLYMARKET_WS_URL:-wss://ws-subscriptions-clob.polymarket.com/ws}"
+      DATABASE_URL: "postgresql://polybot:${POSTGRES_PASSWORD}@postgres:5432/polybot"
+      REDIS_URL: "redis://redis:6379"
+      JWT_SECRET: "${JWT_SECRET}"
+      ENCRYPTION_KEY: "${ENCRYPTION_KEY}"
+      CLOB_AUTH_KEY: "${CLOB_AUTH_KEY:-}"
+      CLOB_AUTH_SECRET: "${CLOB_AUTH_SECRET:-}"
+      CLOB_AUTH_PASSPHRASE: "${CLOB_AUTH_PASSPHRASE:-}"
       LOG_LEVEL: info
-      PORT: 3000
+      PORT: "3000"
     depends_on:
       redis:
         condition: service_healthy
