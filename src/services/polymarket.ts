@@ -116,8 +116,9 @@ export class PolymarketService extends EventEmitter {
 
   private initializeRealTimeDataClient(): void {
     try {
+      // Note: clob_market requires authentication and token IDs, so we only enable public topics
       this.rtdClient = new RealTimeDataAdapter({
-        enabledTopics: ['activity', 'clob_market', 'crypto_prices'],
+        enabledTopics: ['activity', 'crypto_prices'],
         autoReconnect: true,
         maxReconnectAttempts: 10
       });
@@ -491,31 +492,15 @@ export class PolymarketService extends EventEmitter {
   // Real-time Data subscription methods
 
   async subscribeToMarket(marketId: string): Promise<void> {
-    if (!this.rtdClient) {
-      throw new Error('Real-time data client not available');
-    }
-
-    try {
-      await this.rtdClient.subscribe('clob_market', { conditionId: marketId });
-      logger.info(`Subscribed to market updates for ${marketId}`);
-    } catch (error) {
-      logger.error('Error subscribing to market:', error);
-      throw error;
-    }
+    // clob_market subscription requires authentication and token IDs
+    // For public bot, we use polling via Gamma/Data APIs instead
+    logger.debug(`Market subscription skipped (requires auth): ${marketId}`);
   }
 
   async subscribeToWallet(walletAddress: string): Promise<void> {
-    if (!this.rtdClient) {
-      throw new Error('Real-time data client not available');
-    }
-
-    try {
-      await this.rtdClient.subscribe('clob_user', { user: walletAddress });
-      logger.info(`Subscribed to wallet updates for ${walletAddress}`);
-    } catch (error) {
-      logger.error('Error subscribing to wallet:', error);
-      throw error;
-    }
+    // clob_user subscription requires authentication
+    // For public bot, we use polling via Data API instead
+    logger.debug(`Wallet subscription skipped (requires auth): ${walletAddress}`);
   }
 
   async subscribeToActivity(): Promise<void> {
@@ -533,29 +518,13 @@ export class PolymarketService extends EventEmitter {
   }
 
   async unsubscribeFromMarket(marketId: string): Promise<void> {
-    if (!this.rtdClient) {
-      return;
-    }
-
-    try {
-      await this.rtdClient.unsubscribe('clob_market');
-      logger.info(`Unsubscribed from market updates for ${marketId}`);
-    } catch (error) {
-      logger.error('Error unsubscribing from market:', error);
-    }
+    // No-op: clob_market subscription requires authentication
+    logger.debug(`Market unsubscription skipped (requires auth): ${marketId}`);
   }
 
   async unsubscribeFromWallet(walletAddress: string): Promise<void> {
-    if (!this.rtdClient) {
-      return;
-    }
-
-    try {
-      await this.rtdClient.unsubscribe('clob_user');
-      logger.info(`Unsubscribed from wallet updates for ${walletAddress}`);
-    } catch (error) {
-      logger.error('Error unsubscribing from wallet:', error);
-    }
+    // No-op: clob_user subscription requires authentication
+    logger.debug(`Wallet unsubscription skipped (requires auth): ${walletAddress}`);
   }
 
   // Utility methods
