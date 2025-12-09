@@ -3,16 +3,17 @@ import { BaseCommandHandler } from './base-handler';
 import { Context } from 'telegraf';
 import { logger } from '../../utils/logger';
 import { sanitizeInput } from '../utils';
-import { RedisCacheManager } from '../../services/redis/cache-manager';
-import { TrackedWallet } from '../../types/database';
+import { getWalletActivityTracker } from '../../services/wallet-tracker';
 
 export class UntrackHandler extends BaseCommandHandler {
-  private cacheManager: RedisCacheManager;
   private readonly commandName = '/untrack';
 
   constructor(bot: Telegraf) {
     super(bot, '/untrack');
-    this.cacheManager = new RedisCacheManager();
+  }
+
+  private get tracker() {
+    return getWalletActivityTracker();
   }
 
   register(): void {
@@ -113,15 +114,20 @@ export class UntrackHandler extends BaseCommandHandler {
       const userId = ctx.from?.id;
       if (!userId) return;
 
+      const tracker = this.tracker;
+      if (!tracker) {
+        await ctx.reply('❌ Tracking service is not available. Please try again later.');
+        return;
+      }
+
       await ctx.reply('⏳ Removing wallet from tracking...');
 
-      const success = await this.removeWalletFromTracking(userId, address);
+      const result = await tracker.stopTracking(address, userId);
 
-      if (success) {
-        await this.removeWalletFromCache(userId, address);
+      if (result.success) {
         await this.sendUntrackSuccessMessage(ctx, address);
       } else {
-        await ctx.reply('❌ Failed to remove wallet from tracking. Please try again later.');
+        await ctx.reply(`⚠️ ${result.message}`);
       }
 
     } catch (error) {
@@ -265,59 +271,25 @@ export class UntrackHandler extends BaseCommandHandler {
 
   private async checkIfWalletTracked(userId: number, address: string): Promise<boolean> {
     try {
-      const cached = await this.cacheManager.getCachedData(`user_wallets:${userId}`);
-      if (cached && cached[address]) {
-        return true;
-      }
-
-      const userWallets = await this.getUserWallets(userId);
-      return userWallets.some(wallet => wallet.wallet_address === address);
-
+      const tracker = this.tracker;
+      if (!tracker) return false;
+      return tracker.isUserTrackingWallet(userId, address);
     } catch (error) {
       logger.error('Error checking if wallet is tracked:', error);
       return false;
     }
   }
 
-  private async getUserWallets(userId: number): Promise<TrackedWallet[]> {
+  private async getUserWallets(userId: number): Promise<Array<{ wallet_address: string; alias?: string }>> {
     try {
-      const cached = await this.cacheManager.getCachedData(`user_wallets:${userId}`);
-      if (cached) {
-        return Object.values(cached) as TrackedWallet[];
-      }
+      const tracker = this.tracker;
+      if (!tracker) return [];
 
-      const wallets: TrackedWallet[] = [];
-      return wallets;
-
+      const addresses = await tracker.getUserTrackedWallets(userId);
+      return addresses.map(addr => ({ wallet_address: addr }));
     } catch (error) {
       logger.error('Error getting user wallets:', error);
       return [];
-    }
-  }
-
-  private async removeWalletFromTracking(userId: number, address: string): Promise<boolean> {
-    try {
-      await this.cacheManager.deleteCachedData(`user_wallets:${userId}`);
-
-      return true;
-    } catch (error) {
-      logger.error('Error removing wallet from tracking:', error);
-      return false;
-    }
-  }
-
-  private async removeWalletFromCache(userId: number, address: string): Promise<void> {
-    try {
-      const cached = await this.cacheManager.getCachedData(`user_wallets:${userId}`);
-      if (cached && cached[address]) {
-        delete cached[address];
-        await this.cacheManager.setCachedData(`user_wallets:${userId}`, cached, 3600);
-      }
-
-      await this.cacheManager.deleteCachedData(`wallet_data:${address}`);
-
-    } catch (error) {
-      logger.error('Error removing wallet from cache:', error);
     }
   }
 

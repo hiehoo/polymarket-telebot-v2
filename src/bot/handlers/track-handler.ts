@@ -3,16 +3,17 @@ import { BaseCommandHandler } from './base-handler';
 import { Context } from 'telegraf';
 import { logger } from '../../utils/logger';
 import { validateWalletAddress, sanitizeInput } from '../utils';
-import { RedisCacheManager } from '../../services/redis/cache-manager';
-import { TrackedWallet, DatabaseUser } from '../../types/database';
+import { getWalletActivityTracker } from '../../services/wallet-tracker';
 
 export class TrackHandler extends BaseCommandHandler {
-  private cacheManager: RedisCacheManager;
   private readonly commandName = '/track';
 
   constructor(bot: Telegraf) {
     super(bot, '/track');
-    this.cacheManager = new RedisCacheManager();
+  }
+
+  private get tracker() {
+    return getWalletActivityTracker();
   }
 
   register(): void {
@@ -54,15 +55,21 @@ export class TrackHandler extends BaseCommandHandler {
     }
   }
 
-  private async handleTrackAddress(ctx: Context, address: string): Promise<void> {
+  private async handleTrackAddress(ctx: Context, addressInput: string): Promise<void> {
     try {
       const userId = ctx.from?.id;
-      if (!userId) {
+      const chatId = ctx.chat?.id || ctx.from?.id;
+      if (!userId || !chatId) {
         await ctx.reply('❌ Unable to identify user.');
         return;
       }
 
-      const sanitizedAddress = sanitizeInput(address.trim());
+      // Parse address and optional alias (e.g., "/track 0x123... MyWallet")
+      const parts = addressInput.trim().split(/\s+/);
+      const address = parts[0];
+      const alias = parts.slice(1).join(' ') || undefined;
+
+      const sanitizedAddress = sanitizeInput(address);
 
       if (!validateWalletAddress(sanitizedAddress)) {
         await this.sendInvalidAddressError(ctx, sanitizedAddress);
@@ -77,23 +84,29 @@ export class TrackHandler extends BaseCommandHandler {
         return;
       }
 
-      const isAlreadyTracked = await this.checkIfAlreadyTracked(userId, sanitizedAddress);
-      if (isAlreadyTracked) {
-        await this.sendAlreadyTrackedError(ctx, sanitizedAddress);
+      // Use WalletActivityTracker for PostgreSQL persistence
+      const tracker = this.tracker;
+      if (!tracker) {
+        await ctx.reply('❌ Tracking service is not available. Please try again later.');
         return;
       }
 
-      const trackedWallet = await this.addWalletToTracking(userId, sanitizedAddress);
-      if (trackedWallet) {
-        await this.sendTrackSuccessMessage(ctx, trackedWallet);
+      const result = await tracker.startTracking(sanitizedAddress, userId, chatId, alias);
 
-        await this.cacheManager.setCachedData(
-          `user_wallets:${userId}`,
-          { [sanitizedAddress]: trackedWallet },
-          3600
+      if (result.success) {
+        const shortAddress = this.formatAddress(sanitizedAddress);
+        const displayName = alias || shortAddress;
+        await ctx.reply(
+          '✅ *Wallet Successfully Added*\n\n' +
+          `📍 *Address:* \`${sanitizedAddress}\`\n` +
+          `🏷️ *Alias:* ${displayName}\n\n` +
+          '*Notifications Enabled:*\n' +
+          '• 📊 Position changes\n\n' +
+          'Use /w to see your tracked wallets.',
+          { parse_mode: 'Markdown' }
         );
       } else {
-        await ctx.reply('❌ Failed to add wallet to tracking. Please try again later.');
+        await ctx.reply(`⚠️ ${result.message}`);
       }
 
     } catch (error) {
@@ -105,7 +118,8 @@ export class TrackHandler extends BaseCommandHandler {
   private extractAddressFromCommand(messageText: string): string | null {
     const parts = messageText.trim().split(/\s+/);
     if (parts.length < 2) return null;
-    return parts[1];
+    // Return everything after the command (address + optional alias)
+    return parts.slice(1).join(' ');
   }
 
   private async sendAddressInputPrompt(ctx: Context): Promise<void> {
@@ -143,134 +157,14 @@ export class TrackHandler extends BaseCommandHandler {
     );
   }
 
-  private async sendAlreadyTrackedError(ctx: Context, address: string): Promise<void> {
-    await ctx.reply(
-      '⚠️ *Wallet Already Tracked*\n\n' +
-      `The address \`${address}\` is already in your tracking list.\n\n` +
-      '*Actions:*\n' +
-      '• Use /list to see all tracked wallets\n' +
-      '• Use /untrack to remove a wallet\n' +
-      '• Use /balance to check current balance',
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[
-            { text: '📋 My Wallets', callback_data: 'list_my_wallets' },
-            { text: '💳 Check Balance', callback_data: `balance_${address}` }
-          ]]
-        }
-      }
-    );
-  }
-
-  private async sendTrackSuccessMessage(ctx: Context, wallet: TrackedWallet): Promise<void> {
-    const shortAddress = this.formatAddress(wallet.wallet_address);
-    const alias = wallet.alias || shortAddress;
-
-    await ctx.reply(
-      '✅ *Wallet Successfully Added*\n\n' +
-      `📍 *Address:* \`${wallet.wallet_address}\`\n` +
-      `🏷️ *Alias:* ${alias}\n` +
-      `📅 *Added:* ${new Date(wallet.created_at).toLocaleDateString()}\n\n` +
-      '*Notifications Enabled:*\n' +
-      '• 💰 Transaction alerts\n' +
-      '• 📊 Position changes\n' +
-      '• 📈 Price movements\n\n' +
-      'Use /preferences to customize notification settings.',
-      {
-        parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '💳 Check Balance', callback_data: `balance_${wallet.wallet_address}` },
-              { text: '📊 Set Alias', callback_data: `alias_${wallet.wallet_address}` }
-            ],
-            [
-              { text: '📋 My Wallets', callback_data: 'list_my_wallets' },
-              { text: '⚙️ Preferences', callback_data: 'open_preferences' }
-            ]
-          ]
-        }
-      }
-    );
-  }
-
-  private validateWalletAddress(address: string): boolean {
-    const cleanAddress = address.trim().toLowerCase();
-
-    const ethereumPattern = /^0x[a-f0-9]{40}$/;
-    const solanaPattern = /^[1-9a-hj-np-z]{32,44}$/;
-
-    return ethereumPattern.test(cleanAddress) || solanaPattern.test(cleanAddress);
-  }
-
   private async validateAddressWithBlockchain(address: string): Promise<boolean> {
-    try {
-      // Check cache first
-      const cached = await this.cacheManager.getCachedData(`address_validation:${address}`, 300);
-      if (cached !== null) {
-        return cached === 'valid';
-      }
-
-      // For Ethereum addresses, validate checksum
-      if (address.startsWith('0x')) {
-        // Basic validation: correct length and hex characters
-        const isValidFormat = /^0x[a-fA-F0-9]{40}$/.test(address);
-        if (!isValidFormat) {
-          await this.cacheManager.setCachedData(`address_validation:${address}`, 'invalid', 300);
-          return false;
-        }
-
-        // Cache valid result
-        await this.cacheManager.setCachedData(`address_validation:${address}`, 'valid', 300);
-        return true;
-      }
-
-      // For non-Ethereum addresses, apply basic validation
-      const isValidSolana = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
-      if (isValidSolana) {
-        await this.cacheManager.setCachedData(`address_validation:${address}`, 'valid', 300);
-        return true;
-      }
-
-      await this.cacheManager.setCachedData(`address_validation:${address}`, 'invalid', 300);
-      return false;
-    } catch (error) {
-      logger.warn(`Address validation failed for ${address}:`, error);
-      return false;
+    // For Ethereum addresses, validate format
+    if (address.startsWith('0x')) {
+      return /^0x[a-fA-F0-9]{40}$/.test(address);
     }
-  }
 
-  private async checkIfAlreadyTracked(userId: number, address: string): Promise<boolean> {
-    try {
-      const cached = await this.cacheManager.getCachedData(`user_wallets:${userId}`);
-      if (cached && cached[address]) {
-        return true;
-      }
-
-      return false;
-    } catch (error) {
-      logger.error('Error checking if wallet already tracked:', error);
-      return false;
-    }
-  }
-
-  private async addWalletToTracking(userId: number, address: string): Promise<TrackedWallet | null> {
-    try {
-      const wallet: TrackedWallet = {
-        id: `wallet_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        user_id: userId.toString(),
-        wallet_address: address,
-        is_active: true,
-        created_at: new Date(),
-        updated_at: new Date()
-      };
-
-      return wallet;
-    } catch (error) {
-      logger.error('Error adding wallet to tracking:', error);
-      return null;
-    }
+    // For Solana addresses
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
   }
 
   private formatAddress(address: string): string {
