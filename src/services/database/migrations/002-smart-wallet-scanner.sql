@@ -45,8 +45,9 @@ CREATE TABLE IF NOT EXISTS consensus_signals (
     total_value NUMERIC(20,2) NOT NULL,
     wallets JSONB NOT NULL,
     detected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    detected_date DATE GENERATED ALWAYS AS (detected_at::DATE) STORED,
     notified_at TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT unique_consensus_per_day UNIQUE (condition_id, consensus_side, (detected_at::DATE))
+    CONSTRAINT unique_consensus_per_day UNIQUE (condition_id, consensus_side, detected_date)
 );
 
 -- Indexes for query performance
