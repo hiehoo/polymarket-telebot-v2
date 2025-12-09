@@ -56,6 +56,10 @@ class DatabasePool {
 
   private parseDatabaseUrl(url: string): DatabaseConnectionInfo {
     try {
+      // Log the URL being parsed (mask password for security)
+      const maskedUrl = url.replace(/:[^:@]+@/, ':***@');
+      logger.info('Parsing database URL', { url: maskedUrl, envDatabaseUrl: process.env['DATABASE_URL'] ? 'set' : 'not set' });
+
       // Parse PostgreSQL connection URL with proper regex
       const pgUrlRegex = /^(postgres(?:ql)?:\/\/)?(?:([^:]+):([^@]+)@)?([^:]+)(?::(\d+))?(?:\/([^?]+))?(?:\?(.+))?$/;
       const match = url.match(pgUrlRegex);

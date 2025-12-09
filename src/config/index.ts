@@ -64,8 +64,16 @@ const config: Config = {
     wsUrl: process.env['POLYMARKET_WS_URL'] || 'wss://ws-subscriptions-clob.polymarket.com/ws',
   },
   database: {
-    url: process.env['DATABASE_URL'] || 'postgresql://localhost:5432/polymarket_bot',
-    redisUrl: process.env['REDIS_URL'] || 'redis://localhost:6379',
+    // In Docker, DATABASE_URL should use 'postgres' as hostname (Docker network)
+    // Falls back to localhost for local development
+    url: process.env['DATABASE_URL'] ||
+         (process.env['NODE_ENV'] === 'production' && process.env['POSTGRES_PASSWORD']
+           ? `postgresql://polybot:${process.env['POSTGRES_PASSWORD']}@postgres:5432/polybot`
+           : 'postgresql://localhost:5432/polymarket_bot'),
+    redisUrl: process.env['REDIS_URL'] ||
+              (process.env['NODE_ENV'] === 'production'
+                ? 'redis://redis:6379'
+                : 'redis://localhost:6379'),
   },
   security: {
     jwtSecret: process.env['JWT_SECRET'] || '',
