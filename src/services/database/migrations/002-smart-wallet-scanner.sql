@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS smart_wallets (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     address VARCHAR(42) UNIQUE NOT NULL,
     alias VARCHAR(100) NOT NULL,
+    category VARCHAR(50),
+    category_rank INT,
+    pnl NUMERIC(20,2),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
