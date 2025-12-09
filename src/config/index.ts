@@ -40,6 +40,12 @@ interface Config {
     maxReconnectAttempts: number;
     reconnectDelayMs: number;
   };
+  consensus: {
+    enabled: boolean;
+    minTraders: number;
+    minValue: number;
+    cooldownMs: number;
+  };
 }
 
 const config: Config = {
@@ -78,6 +84,12 @@ const config: Config = {
     checkIntervalMs: parseInt(process.env['HEALTH_CHECK_INTERVAL_MS'] || '30000', 10),
     maxReconnectAttempts: parseInt(process.env['MAX_RECONNECT_ATTEMPTS'] || '5', 10),
     reconnectDelayMs: parseInt(process.env['RECONNECT_DELAY_MS'] || '5000', 10),
+  },
+  consensus: {
+    enabled: process.env['CONSENSUS_ENABLED'] !== 'false',
+    minTraders: parseInt(process.env['CONSENSUS_MIN_TRADERS'] || '2', 10),
+    minValue: parseInt(process.env['CONSENSUS_MIN_VALUE'] || '500', 10),
+    cooldownMs: parseInt(process.env['CONSENSUS_COOLDOWN_MS'] || '3600000', 10), // 1 hour
   },
 };
 

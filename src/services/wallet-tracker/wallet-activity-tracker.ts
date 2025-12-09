@@ -13,7 +13,19 @@ import {
   detectChanges,
   createSnapshotFromPositions,
   formatNotification,
+  getPositionKey,
 } from './position-diff-detector';
+import {
+  ConsensusSignalDetector,
+  ConsensusSignal,
+  formatConsensusNotification,
+  createConsensusSignalDetector,
+} from './consensus-signal-detector';
+import {
+  WalletTrackerRepository,
+  getWalletTrackerRepository,
+} from './wallet-tracker-repository';
+import { config } from '@/config';
 
 export interface TrackerConfig {
   redis: SimpleRedisClient;
@@ -38,18 +50,16 @@ interface WalletSubscriber {
   alias?: string;
 }
 
-// Redis key patterns
+// Redis key patterns - only for ephemeral cache data (snapshots)
 const REDIS_KEYS = {
   snapshot: (wallet: string) => `wallet_tracker:snapshot:${wallet.toLowerCase()}`,
-  userWallets: (userId: number) => `wallet_tracker:user:${userId}`,
-  walletSubscribers: (wallet: string) => `wallet_tracker:subscribers:${wallet.toLowerCase()}`,
-  allTrackedWallets: 'wallet_tracker:all_wallets',
 };
 
 export class WalletActivityTracker {
   private redis: SimpleRedisClient;
   private polymarketService: PolymarketService;
   private bot: Telegraf<Context>;
+  private repository: WalletTrackerRepository;
   private pollIntervalMs: number;
   private maxWallets: number;
   private enabled: boolean;
@@ -57,14 +67,30 @@ export class WalletActivityTracker {
   private isPolling = false;
   private pollIndex = 0;
   private trackedWallets: string[] = [];
+  private consensusDetector: ConsensusSignalDetector;
+  private isInitialLoad = true;
 
-  constructor(config: TrackerConfig) {
-    this.redis = config.redis;
-    this.polymarketService = config.polymarketService;
-    this.bot = config.bot;
-    this.pollIntervalMs = config.pollIntervalMs || 60000; // 60 seconds default
-    this.maxWallets = config.maxWallets || 100;
-    this.enabled = config.enabled !== false;
+  constructor(trackerConfig: TrackerConfig) {
+    this.redis = trackerConfig.redis;
+    this.polymarketService = trackerConfig.polymarketService;
+    this.bot = trackerConfig.bot;
+    this.repository = getWalletTrackerRepository();
+    this.pollIntervalMs = trackerConfig.pollIntervalMs || 60000; // 60 seconds default
+    this.maxWallets = trackerConfig.maxWallets || 100;
+    this.enabled = trackerConfig.enabled !== false;
+
+    // Initialize consensus detector
+    this.consensusDetector = createConsensusSignalDetector({
+      enabled: config.consensus.enabled,
+      minTraders: config.consensus.minTraders,
+      minValue: config.consensus.minValue,
+      cooldownMs: config.consensus.cooldownMs,
+    });
+
+    // Listen for consensus signals
+    this.consensusDetector.on('consensus', (signal: ConsensusSignal) => {
+      this.handleConsensusSignal(signal);
+    });
   }
 
   /**
@@ -82,12 +108,20 @@ export class WalletActivityTracker {
       // Load tracked wallets from Redis
       await this.loadTrackedWallets();
 
+      // Build initial consensus index from existing snapshots
+      await this.buildInitialConsensusIndex();
+
+      // Mark initial load complete - consensus detector can now emit signals
+      this.isInitialLoad = false;
+      this.consensusDetector.markInitialized();
+
       // Start polling
       this.startPolling();
 
       logger.info('Wallet Activity Tracker initialized', {
         trackedWallets: this.trackedWallets.length,
         pollIntervalMs: this.pollIntervalMs,
+        consensusStats: this.consensusDetector.getStats(),
       });
     } catch (error) {
       logger.error('Failed to initialize Wallet Activity Tracker', {
@@ -107,6 +141,7 @@ export class WalletActivityTracker {
 
   /**
    * Start tracking a wallet for a user
+   * Uses PostgreSQL for persistent storage
    */
   async startTracking(
     walletAddress: string,
@@ -117,15 +152,6 @@ export class WalletActivityTracker {
     const normalizedWallet = walletAddress.toLowerCase();
 
     try {
-      // Check max wallets limit
-      const userWallets = await this.getUserTrackedWallets(userId);
-      if (userWallets.length >= 10) {
-        return {
-          success: false,
-          message: 'Maximum 10 wallets per user. Remove a wallet first.',
-        };
-      }
-
       // Check global max wallets
       if (this.trackedWallets.length >= this.maxWallets) {
         return {
@@ -134,26 +160,24 @@ export class WalletActivityTracker {
         };
       }
 
-      // Add to user's tracked wallets
-      const subscriber: WalletSubscriber = { userId, chatId, alias };
-      await this.redis.hset(
-        REDIS_KEYS.walletSubscribers(normalizedWallet),
-        String(userId),
-        subscriber
-      );
+      // Add to PostgreSQL (handles limit check internally)
+      const result = await this.repository.addTrackedWallet(userId, chatId, normalizedWallet, alias);
 
-      // Add wallet to user's list
-      await this.redis.sadd(REDIS_KEYS.userWallets(userId), normalizedWallet);
+      if (!result.success) {
+        return result;
+      }
 
-      // Add to global tracked wallets set
-      await this.redis.sadd(REDIS_KEYS.allTrackedWallets, normalizedWallet);
-
-      // Fetch and store initial snapshot
+      // Fetch and store initial snapshot in Redis cache
       await this.fetchAndStoreSnapshot(normalizedWallet);
 
       // Update local cache
       if (!this.trackedWallets.includes(normalizedWallet)) {
         this.trackedWallets.push(normalizedWallet);
+      }
+
+      // Set wallet alias in consensus detector
+      if (alias) {
+        this.consensusDetector.setWalletAlias(normalizedWallet, alias);
       }
 
       logger.info('Started tracking wallet', {
@@ -181,6 +205,7 @@ export class WalletActivityTracker {
 
   /**
    * Stop tracking a wallet for a user
+   * Uses PostgreSQL for persistent storage
    */
   async stopTracking(
     walletAddress: string,
@@ -189,27 +214,24 @@ export class WalletActivityTracker {
     const normalizedWallet = walletAddress.toLowerCase();
 
     try {
-      // Remove from user's tracked wallets
-      await this.redis.hdel(REDIS_KEYS.walletSubscribers(normalizedWallet), String(userId));
-      await this.redis.srem(REDIS_KEYS.userWallets(userId), normalizedWallet);
+      // Remove from PostgreSQL
+      const result = await this.repository.removeTrackedWallet(userId, normalizedWallet);
 
-      // Check if any other users are tracking this wallet
-      const subscribers = await this.redis.hgetall(REDIS_KEYS.walletSubscribers(normalizedWallet));
-      if (Object.keys(subscribers).length === 0) {
-        // No more subscribers, remove from global list and clean up snapshot
-        await this.redis.srem(REDIS_KEYS.allTrackedWallets, normalizedWallet);
-        await this.redis.del(REDIS_KEYS.snapshot(normalizedWallet));
+      if (result.success) {
+        // Check if any other users are tracking this wallet
+        const subscribers = await this.repository.getWalletSubscribers(normalizedWallet);
+        if (subscribers.length === 0) {
+          // No more subscribers, clean up Redis snapshot cache
+          await this.redis.del(REDIS_KEYS.snapshot(normalizedWallet));
 
-        // Update local cache
-        this.trackedWallets = this.trackedWallets.filter(w => w !== normalizedWallet);
+          // Update local cache
+          this.trackedWallets = this.trackedWallets.filter(w => w !== normalizedWallet);
+        }
+
+        logger.info('Stopped tracking wallet', { wallet: normalizedWallet, userId });
       }
 
-      logger.info('Stopped tracking wallet', { wallet: normalizedWallet, userId });
-
-      return {
-        success: true,
-        message: `Stopped tracking ${this.formatShortAddress(normalizedWallet)}.`,
-      };
+      return result;
     } catch (error) {
       logger.error('Failed to stop tracking wallet', {
         wallet: normalizedWallet,
@@ -225,10 +247,12 @@ export class WalletActivityTracker {
 
   /**
    * Get list of wallets tracked by a user
+   * Uses PostgreSQL for persistent storage
    */
   async getUserTrackedWallets(userId: number): Promise<string[]> {
     try {
-      return await this.redis.smembers(REDIS_KEYS.userWallets(userId));
+      const wallets = await this.repository.getUserTrackedWallets(userId);
+      return wallets.map(w => w.address);
     } catch (error) {
       logger.error('Failed to get user tracked wallets', { userId, error });
       return [];
@@ -237,12 +261,11 @@ export class WalletActivityTracker {
 
   /**
    * Check if user is tracking a wallet
+   * Uses PostgreSQL for persistent storage
    */
   async isUserTrackingWallet(userId: number, walletAddress: string): Promise<boolean> {
-    const normalizedWallet = walletAddress.toLowerCase();
     try {
-      const result = await this.redis.sismember(REDIS_KEYS.userWallets(userId), normalizedWallet);
-      return result === 1;
+      return await this.repository.isUserTrackingWallet(userId, walletAddress);
     } catch (error) {
       logger.error('Failed to check if user is tracking wallet', { userId, walletAddress, error });
       return false;
@@ -250,12 +273,12 @@ export class WalletActivityTracker {
   }
 
   /**
-   * Load tracked wallets from Redis
+   * Load tracked wallets from PostgreSQL
    */
   private async loadTrackedWallets(): Promise<void> {
     try {
-      this.trackedWallets = await this.redis.smembers(REDIS_KEYS.allTrackedWallets);
-      logger.info('Loaded tracked wallets', { count: this.trackedWallets.length });
+      this.trackedWallets = await this.repository.getAllTrackedWallets();
+      logger.info('Loaded tracked wallets from PostgreSQL', { count: this.trackedWallets.length });
     } catch (error) {
       logger.error('Failed to load tracked wallets', { error });
       this.trackedWallets = [];
@@ -367,6 +390,9 @@ export class WalletActivityTracker {
     // Detect changes
     const changes = detectChanges(previousSnapshot, currentSnapshot);
 
+    // Update consensus detector with current positions (always, for index maintenance)
+    this.updateConsensusIndex(walletAddress, currentSnapshot, changes);
+
     if (changes.length > 0) {
       logger.info('Detected position changes', {
         wallet: walletAddress,
@@ -424,18 +450,17 @@ export class WalletActivityTracker {
 
   /**
    * Send notifications to all subscribers of a wallet
+   * Uses PostgreSQL for subscriber lookup
    */
   private async notifySubscribers(
     walletAddress: string,
     changes: PositionChange[]
   ): Promise<void> {
     try {
-      const subscribersData = await this.redis.hgetall(REDIS_KEYS.walletSubscribers(walletAddress));
+      const subscribers = await this.repository.getWalletSubscribers(walletAddress);
 
-      for (const [userId, subscriberJson] of Object.entries(subscribersData)) {
+      for (const subscriber of subscribers) {
         try {
-          const subscriber: WalletSubscriber = JSON.parse(subscriberJson);
-
           for (const change of changes) {
             const displayWallet = subscriber.alias || walletAddress;
             const message = formatNotification(change, displayWallet);
@@ -447,7 +472,7 @@ export class WalletActivityTracker {
           }
         } catch (error) {
           logger.error('Failed to notify subscriber', {
-            userId,
+            odoo: subscriber.userId,
             wallet: walletAddress,
             error: error instanceof Error ? error.message : 'Unknown error',
           });
@@ -456,6 +481,133 @@ export class WalletActivityTracker {
     } catch (error) {
       logger.error('Failed to notify subscribers', {
         wallet: walletAddress,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * Build initial consensus index from existing snapshots
+   * Uses PostgreSQL for wallet aliases
+   */
+  private async buildInitialConsensusIndex(): Promise<void> {
+    logger.info('Building initial consensus index...');
+
+    // Load all wallet aliases from PostgreSQL
+    const aliases = await this.repository.getAllWalletAliases();
+    for (const [wallet, alias] of aliases) {
+      this.consensusDetector.setWalletAlias(wallet, alias);
+    }
+
+    for (const wallet of this.trackedWallets) {
+      try {
+        const snapshotJson = await this.redis.get(REDIS_KEYS.snapshot(wallet));
+        if (!snapshotJson) continue;
+
+        const snapshot = this.deserializeSnapshot(snapshotJson);
+
+        // Add all positions to index as EXISTING
+        for (const position of snapshot.values()) {
+          this.consensusDetector.updatePosition(wallet, position, 'EXISTING' as any);
+        }
+      } catch (error) {
+        logger.error('Failed to load snapshot for consensus index', {
+          wallet,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+
+    logger.info('Consensus index built', {
+      stats: this.consensusDetector.getStats(),
+    });
+  }
+
+  /**
+   * Update consensus index with position changes
+   */
+  private updateConsensusIndex(
+    walletAddress: string,
+    currentSnapshot: Map<string, PositionSnapshot>,
+    changes: PositionChange[]
+  ): void {
+    // Create a map of changes by position key for quick lookup
+    const changeMap = new Map<string, PositionChange>();
+    for (const change of changes) {
+      const key = `${change.conditionId}:${change.outcome}`;
+      changeMap.set(key, change);
+    }
+
+    // Update all current positions
+    for (const [positionKey, position] of currentSnapshot) {
+      const change = changeMap.get(positionKey);
+      const changeType = change?.type || 'EXISTING';
+      this.consensusDetector.updatePosition(walletAddress, position, changeType as any);
+    }
+
+    // Handle closed positions
+    for (const change of changes) {
+      if (change.type === 'CLOSED') {
+        const positionKey = `${change.conditionId}:${change.outcome}`;
+        this.consensusDetector.removePosition(walletAddress, positionKey);
+      }
+    }
+  }
+
+  /**
+   * Handle consensus signal - send notifications to all relevant subscribers
+   * Uses PostgreSQL for subscriber lookup
+   */
+  private async handleConsensusSignal(signal: ConsensusSignal): Promise<void> {
+    try {
+      logger.info('Handling consensus signal', {
+        market: signal.marketTitle,
+        outcome: signal.outcome,
+        traders: signal.traderCount,
+        totalValue: signal.totalEntryValue,
+      });
+
+      // Get all unique subscribers across all traders in the consensus
+      const allSubscribers = new Map<number, { chatId: number; alias?: string }>();
+
+      for (const trader of signal.traders) {
+        const subscribers = await this.repository.getWalletSubscribers(trader.wallet);
+
+        for (const subscriber of subscribers) {
+          // Only add if not already present (avoid duplicate notifications)
+          if (!allSubscribers.has(subscriber.userId)) {
+            allSubscribers.set(subscriber.userId, {
+              chatId: subscriber.chatId,
+              alias: subscriber.alias,
+            });
+          }
+        }
+      }
+
+      // Send consensus notification to all subscribers
+      const message = formatConsensusNotification(signal);
+
+      for (const [userId, subscriber] of allSubscribers) {
+        try {
+          await this.bot.telegram.sendMessage(subscriber.chatId, message, {
+            parse_mode: 'MarkdownV2',
+            link_preview_options: { is_disabled: true },
+          });
+        } catch (error) {
+          logger.error('Failed to send consensus notification', {
+            userId,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
+
+      logger.info('Consensus notifications sent', {
+        signalId: signal.signalId,
+        recipientCount: allSubscribers.size,
+      });
+    } catch (error) {
+      logger.error('Failed to handle consensus signal', {
+        signalId: signal.signalId,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }
@@ -500,13 +652,33 @@ export class WalletActivityTracker {
     isPolling: boolean;
     trackedWallets: number;
     pollIntervalMs: number;
+    consensus: {
+      enabled: boolean;
+      totalMarkets: number;
+      totalPositions: number;
+      activeConsensuses: number;
+    };
   } {
+    const consensusStats = this.consensusDetector.getStats();
     return {
       enabled: this.enabled,
       isPolling: this.isPolling,
       trackedWallets: this.trackedWallets.length,
       pollIntervalMs: this.pollIntervalMs,
+      consensus: {
+        enabled: config.consensus.enabled,
+        totalMarkets: consensusStats.totalMarkets,
+        totalPositions: consensusStats.totalPositions,
+        activeConsensuses: consensusStats.activeConsensuses,
+      },
     };
+  }
+
+  /**
+   * Get active consensus signals
+   */
+  getActiveConsensuses(): ReturnType<ConsensusSignalDetector['getActiveConsensuses']> {
+    return this.consensusDetector.getActiveConsensuses();
   }
 }
 
