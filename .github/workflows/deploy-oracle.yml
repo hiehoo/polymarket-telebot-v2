@@ -56,13 +56,13 @@ jobs:
             git reset --hard origin/main
 
             # Rebuild and restart containers
-            podman-compose down
-            podman-compose up -d --build
+            docker-compose down
+            docker-compose up -d --build
 
             # Wait for startup
             sleep 15
 
             # Verify containers are running
-            podman-compose ps
+            docker-compose ps
 
             echo "✅ Deployment completed at $(date)"
