@@ -13,14 +13,7 @@ import {
   detectChanges,
   createSnapshotFromPositions,
   formatNotification,
-  getPositionKey,
 } from './position-diff-detector';
-import {
-  ConsensusSignalDetector,
-  ConsensusSignal,
-  formatConsensusNotification,
-  createConsensusSignalDetector,
-} from './consensus-signal-detector';
 import {
   WalletTrackerRepository,
   getWalletTrackerRepository,
@@ -67,8 +60,6 @@ export class WalletActivityTracker {
   private isPolling = false;
   private pollIndex = 0;
   private trackedWallets: string[] = [];
-  private consensusDetector: ConsensusSignalDetector;
-  private isInitialLoad = true;
 
   constructor(trackerConfig: TrackerConfig) {
     this.redis = trackerConfig.redis;
@@ -78,19 +69,6 @@ export class WalletActivityTracker {
     this.pollIntervalMs = trackerConfig.pollIntervalMs || 60000; // 60 seconds default
     this.maxWallets = trackerConfig.maxWallets || 100;
     this.enabled = trackerConfig.enabled !== false;
-
-    // Initialize consensus detector
-    this.consensusDetector = createConsensusSignalDetector({
-      enabled: config.consensus.enabled,
-      minTraders: config.consensus.minTraders,
-      minValue: config.consensus.minValue,
-      cooldownMs: config.consensus.cooldownMs,
-    });
-
-    // Listen for consensus signals
-    this.consensusDetector.on('consensus', (signal: ConsensusSignal) => {
-      this.handleConsensusSignal(signal);
-    });
   }
 
   /**
@@ -105,15 +83,8 @@ export class WalletActivityTracker {
     try {
       logger.info('Initializing Wallet Activity Tracker...');
 
-      // Load tracked wallets from Redis
+      // Load tracked wallets from PostgreSQL
       await this.loadTrackedWallets();
-
-      // Build initial consensus index from existing snapshots
-      await this.buildInitialConsensusIndex();
-
-      // Mark initial load complete - consensus detector can now emit signals
-      this.isInitialLoad = false;
-      this.consensusDetector.markInitialized();
 
       // Start polling
       this.startPolling();
@@ -121,7 +92,6 @@ export class WalletActivityTracker {
       logger.info('Wallet Activity Tracker initialized', {
         trackedWallets: this.trackedWallets.length,
         pollIntervalMs: this.pollIntervalMs,
-        consensusStats: this.consensusDetector.getStats(),
       });
     } catch (error) {
       logger.error('Failed to initialize Wallet Activity Tracker', {
@@ -173,11 +143,6 @@ export class WalletActivityTracker {
       // Update local cache
       if (!this.trackedWallets.includes(normalizedWallet)) {
         this.trackedWallets.push(normalizedWallet);
-      }
-
-      // Set wallet alias in consensus detector
-      if (alias) {
-        this.consensusDetector.setWalletAlias(normalizedWallet, alias);
       }
 
       logger.info('Started tracking wallet', {
@@ -390,9 +355,6 @@ export class WalletActivityTracker {
     // Detect changes
     const changes = detectChanges(previousSnapshot, currentSnapshot);
 
-    // Update consensus detector with current positions (always, for index maintenance)
-    this.updateConsensusIndex(walletAddress, currentSnapshot, changes);
-
     if (changes.length > 0) {
       logger.info('Detected position changes', {
         wallet: walletAddress,
@@ -547,133 +509,6 @@ export class WalletActivityTracker {
   }
 
   /**
-   * Build initial consensus index from existing snapshots
-   * Uses PostgreSQL for wallet aliases
-   */
-  private async buildInitialConsensusIndex(): Promise<void> {
-    logger.info('Building initial consensus index...');
-
-    // Load all wallet aliases from PostgreSQL
-    const aliases = await this.repository.getAllWalletAliases();
-    for (const [wallet, alias] of aliases) {
-      this.consensusDetector.setWalletAlias(wallet, alias);
-    }
-
-    for (const wallet of this.trackedWallets) {
-      try {
-        const snapshotJson = await this.redis.get(REDIS_KEYS.snapshot(wallet));
-        if (!snapshotJson) continue;
-
-        const snapshot = this.deserializeSnapshot(snapshotJson);
-
-        // Add all positions to index as EXISTING
-        for (const position of snapshot.values()) {
-          this.consensusDetector.updatePosition(wallet, position, 'EXISTING' as any);
-        }
-      } catch (error) {
-        logger.error('Failed to load snapshot for consensus index', {
-          wallet,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
-      }
-    }
-
-    logger.info('Consensus index built', {
-      stats: this.consensusDetector.getStats(),
-    });
-  }
-
-  /**
-   * Update consensus index with position changes
-   */
-  private updateConsensusIndex(
-    walletAddress: string,
-    currentSnapshot: Map<string, PositionSnapshot>,
-    changes: PositionChange[]
-  ): void {
-    // Create a map of changes by position key for quick lookup
-    const changeMap = new Map<string, PositionChange>();
-    for (const change of changes) {
-      const key = `${change.conditionId}:${change.outcome}`;
-      changeMap.set(key, change);
-    }
-
-    // Update all current positions
-    for (const [positionKey, position] of currentSnapshot) {
-      const change = changeMap.get(positionKey);
-      const changeType = change?.type || 'EXISTING';
-      this.consensusDetector.updatePosition(walletAddress, position, changeType as any);
-    }
-
-    // Handle closed positions
-    for (const change of changes) {
-      if (change.type === 'CLOSED') {
-        const positionKey = `${change.conditionId}:${change.outcome}`;
-        this.consensusDetector.removePosition(walletAddress, positionKey);
-      }
-    }
-  }
-
-  /**
-   * Handle consensus signal - send notifications to all relevant subscribers
-   * Uses PostgreSQL for subscriber lookup
-   */
-  private async handleConsensusSignal(signal: ConsensusSignal): Promise<void> {
-    try {
-      logger.info('Handling consensus signal', {
-        market: signal.marketTitle,
-        outcome: signal.outcome,
-        traders: signal.traderCount,
-        totalValue: signal.totalEntryValue,
-      });
-
-      // Get all unique subscribers across all traders in the consensus
-      const allSubscribers = new Map<number, { chatId: number; alias?: string }>();
-
-      for (const trader of signal.traders) {
-        const subscribers = await this.repository.getWalletSubscribers(trader.wallet);
-
-        for (const subscriber of subscribers) {
-          // Only add if not already present (avoid duplicate notifications)
-          if (!allSubscribers.has(subscriber.userId)) {
-            allSubscribers.set(subscriber.userId, {
-              chatId: subscriber.chatId,
-              alias: subscriber.alias,
-            });
-          }
-        }
-      }
-
-      // Send consensus notification to all subscribers
-      const message = formatConsensusNotification(signal);
-
-      for (const [userId, subscriber] of allSubscribers) {
-        try {
-          await this.bot.telegram.sendMessage(subscriber.chatId, message, {
-            parse_mode: 'MarkdownV2',
-            link_preview_options: { is_disabled: true },
-          });
-        } catch (error) {
-          logger.error('Failed to send consensus notification', {
-            userId,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          });
-        }
-      }
-
-      logger.info('Consensus notifications sent', {
-        signalId: signal.signalId,
-        recipientCount: allSubscribers.size,
-      });
-    } catch (error) {
-      logger.error('Failed to handle consensus signal', {
-        signalId: signal.signalId,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
-  }
-
-  /**
    * Serialize snapshot to JSON string
    */
   private serializeSnapshot(snapshot: Map<string, PositionSnapshot>): string {
@@ -712,33 +547,13 @@ export class WalletActivityTracker {
     isPolling: boolean;
     trackedWallets: number;
     pollIntervalMs: number;
-    consensus: {
-      enabled: boolean;
-      totalMarkets: number;
-      totalPositions: number;
-      activeConsensuses: number;
-    };
   } {
-    const consensusStats = this.consensusDetector.getStats();
     return {
       enabled: this.enabled,
       isPolling: this.isPolling,
       trackedWallets: this.trackedWallets.length,
       pollIntervalMs: this.pollIntervalMs,
-      consensus: {
-        enabled: config.consensus.enabled,
-        totalMarkets: consensusStats.totalMarkets,
-        totalPositions: consensusStats.totalPositions,
-        activeConsensuses: consensusStats.activeConsensuses,
-      },
     };
-  }
-
-  /**
-   * Get active consensus signals
-   */
-  getActiveConsensuses(): ReturnType<ConsensusSignalDetector['getActiveConsensuses']> {
-    return this.consensusDetector.getActiveConsensuses();
   }
 }
 

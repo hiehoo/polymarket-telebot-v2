@@ -15,16 +15,6 @@ export {
 } from './wallet-activity-tracker';
 
 export {
-  ConsensusSignalDetector,
-  ConsensusConfig,
-  ConsensusSignal,
-  MarketConsensus,
-  TraderPosition,
-  formatConsensusNotification,
-  createConsensusSignalDetector,
-} from './consensus-signal-detector';
-
-export {
   WalletTrackerRepository,
   WalletSubscriber,
   getWalletTrackerRepository,
