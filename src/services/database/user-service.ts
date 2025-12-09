@@ -375,4 +375,22 @@ export class UserService {
       logger.error('Error bulk updating wallet last activity:', error);
     }
   }
+
+  /**
+   * Get all active user telegram IDs (for broadcast notifications)
+   */
+  async getActiveUserTelegramIds(): Promise<number[]> {
+    try {
+      const activeIds: number[] = [];
+      for (const [telegramId, user] of this.userCache) {
+        if (user.is_active) {
+          activeIds.push(telegramId);
+        }
+      }
+      return activeIds;
+    } catch (error) {
+      logger.error('Error getting active user telegram IDs:', error);
+      return [];
+    }
+  }
 }

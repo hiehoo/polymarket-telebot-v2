@@ -42,6 +42,14 @@ interface Config {
     maxReconnectAttempts: number;
     reconnectDelayMs: number;
   };
+  consensus: {
+    enabled: boolean;
+    cronSchedule: string;
+    minWallets: number;
+    minOrderValue: number;
+    minPortfolioPercent: number;
+    scanDelayMs: number;
+  };
 }
 
 const config: Config = {
@@ -82,6 +90,14 @@ const config: Config = {
     checkIntervalMs: parseInt(process.env['HEALTH_CHECK_INTERVAL_MS'] || '30000', 10),
     maxReconnectAttempts: parseInt(process.env['MAX_RECONNECT_ATTEMPTS'] || '5', 10),
     reconnectDelayMs: parseInt(process.env['RECONNECT_DELAY_MS'] || '5000', 10),
+  },
+  consensus: {
+    enabled: process.env['CONSENSUS_ENABLED'] !== 'false',
+    cronSchedule: process.env['CONSENSUS_CRON_SCHEDULE'] || '0 6 * * *', // 6 AM daily
+    minWallets: parseInt(process.env['CONSENSUS_MIN_WALLETS'] || '3', 10),
+    minOrderValue: parseInt(process.env['CONSENSUS_MIN_ORDER_VALUE'] || '2000', 10),
+    minPortfolioPercent: parseFloat(process.env['CONSENSUS_MIN_PORTFOLIO_PERCENT'] || '2'),
+    scanDelayMs: parseInt(process.env['CONSENSUS_SCAN_DELAY_MS'] || '1000', 10),
   },
 };
 

@@ -9,6 +9,8 @@ import databasePool from './services/database/connection-pool';
 import { PolymarketService, createPolymarketService } from './services/polymarket';
 import { simpleRedisClient } from './services/redis';
 import { WalletActivityTracker, createWalletActivityTracker } from './services/wallet-tracker';
+import { SmartWalletScanner, createSmartWalletScanner } from './services/consensus';
+import { registerSmartWalletCommands } from './bot/handlers/smart-wallet-handler';
 
 // Helper function to escape MarkdownV2 special characters
 function escapeMarkdownV2(text: string): string {
@@ -35,6 +37,9 @@ const polymarketService = createPolymarketService({
 // Wallet Activity Tracker (initialized in startBot)
 let walletTracker: WalletActivityTracker | null = null;
 
+// Smart Wallet Scanner (initialized in startBot)
+let consensusScanner: SmartWalletScanner | null = null;
+
 // Setup service event listeners
 polymarketService.on('websocket:connected', () => {
   logger.info('Real-time WebSocket connection established');
@@ -55,6 +60,7 @@ polymarketService.on('realtime:event', (event) => {
 // Setup graceful shutdown
 process.on('SIGINT', async () => {
   logger.info('Received SIGINT, shutting down gracefully...');
+  if (consensusScanner) consensusScanner.stop();
   if (walletTracker) await walletTracker.shutdown();
   await polymarketService.shutdown();
   await bot.stop();
@@ -63,6 +69,7 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   logger.info('Received SIGTERM, shutting down gracefully...');
+  if (consensusScanner) consensusScanner.stop();
   if (walletTracker) await walletTracker.shutdown();
   await polymarketService.shutdown();
   await bot.stop();
@@ -1142,6 +1149,31 @@ async function startBot() {
     } else {
       logger.warn('⚠️ Wallet Activity Tracker disabled (Redis not available)');
     }
+
+    // Initialize Consensus Scanner
+    if (config.consensus.enabled) {
+      consensusScanner = createSmartWalletScanner(bot, polymarketService.getRestClient(), {
+        enabled: config.consensus.enabled,
+        cronSchedule: config.consensus.cronSchedule,
+        minWallets: config.consensus.minWallets,
+        minOrderValue: config.consensus.minOrderValue,
+        minPortfolioPercent: config.consensus.minPortfolioPercent,
+        scanDelayMs: config.consensus.scanDelayMs,
+      });
+
+      // Set up broadcast provider - all active users receive notifications by default
+      consensusScanner.setActiveChatIdsProvider(async () => {
+        return await userService.getActiveUserTelegramIds();
+      });
+
+      consensusScanner.start();
+      logger.info('✅ Consensus Scanner initialized (broadcast mode)');
+    } else {
+      logger.info('ℹ️ Consensus Scanner disabled');
+    }
+
+    // Register smart wallet commands
+    registerSmartWalletCommands(bot);
 
     // Launch Telegram bot
     await bot.launch();

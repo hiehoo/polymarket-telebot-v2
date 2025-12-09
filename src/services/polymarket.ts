@@ -533,6 +533,10 @@ export class PolymarketService extends EventEmitter {
     return { ...this.stats };
   }
 
+  getRestClient(): PolymarketRestClient {
+    return this.restClient;
+  }
+
   async connect(): Promise<void> {
     try {
       if (this.rtdClient) {
