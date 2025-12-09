@@ -10,6 +10,11 @@ import { PolymarketService, createPolymarketService } from './services/polymarke
 import { simpleRedisClient } from './services/redis';
 import { WalletActivityTracker, createWalletActivityTracker } from './services/wallet-tracker';
 
+// Helper function to escape MarkdownV2 special characters
+function escapeMarkdownV2(text: string): string {
+  return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+}
+
 // Validate configuration on startup
 try {
   validateConfig();
@@ -107,38 +112,52 @@ bot.catch((error: any, ctx) => {
 bot.start((ctx) => {
   logger.info(`User ${ctx.from?.id} started the bot`);
   ctx.reply(
-    '🎯 Welcome to Polymarket Telegram Bot!\n\n' +
-    'Track wallet activity in real-time with instant notifications.\n\n' +
-    'Available commands:\n' +
-    '/help - Show all commands\n' +
-    '/track <wallet> - Track a wallet\n' +
-    '/list - Show tracked wallets\n' +
-    '/alerts - Manage alerts\n' +
-    '/settings - Configure preferences\n' +
-    '/status - Check bot status'
+    '🎯 *Welcome to Polymarket Tracker\\!*\n\n' +
+    '━━━━━━━━━━━━━━━━━━━━━━\n' +
+    '📊 Track whale wallets in real\\-time\n' +
+    '🔔 Get instant position notifications\n' +
+    '📈 Monitor market movements\n' +
+    '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+    '⚡ *Quick Start:*\n' +
+    '`/track 0x...` \\- Start tracking a wallet\n' +
+    '`/track 0x... Whale1` \\- Track with custom name\n\n' +
+    '📋 *Commands:*\n' +
+    '├ /list \\- Your tracked wallets\n' +
+    '├ /manage \\- Manage wallets\n' +
+    '├ /markets \\- Trending markets\n' +
+    '├ /status \\- Bot status\n' +
+    '└ /help \\- All commands\n\n' +
+    '💡 _Tip: Add a name when tracking\\!_\n' +
+    '`/track 0x123... MyWhale`',
+    { parse_mode: 'MarkdownV2' }
   );
 });
 
 bot.help((ctx) => {
   ctx.reply(
-    '📋 *Enhanced Polymarket Bot*\n\n' +
-    '🔍 *Wallet Tracking*\n' +
-    '/track `0x...` \\- Track wallet activity\n' +
-    '/untrack `0x...` \\- Stop tracking wallet\n' +
-    '/list \\- Show tracked wallets\n\n' +
-    '📈 *Market Data & Analytics*\n' +
-    '/markets \\- View trending markets\n' +
-    '/market `id` \\- Get market details\n' +
-    '/positions `0x...` \\- Check wallet positions\n' +
-    '/orderbook `market_id` \\- Real\\-time order book\n' +
-    '/analytics `0x...` \\- Wallet analytics\n\n' +
-    '⚡ *Real\\-time Features*\n' +
-    '/alerts \\- Manage notification alerts\n' +
-    '/mute \\- Temporarily mute notifications\n' +
-    '/unmute \\- Enable notifications\n\n' +
-    '⚙️ *System & Performance*\n' +
-    '/settings \\- Configure preferences\n' +
-    '/status \\- System status with metrics',
+    '📖 *Command Reference*\n' +
+    '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+    '👛 *Wallet Management*\n' +
+    '├ `/track 0x... [name]` \\- Track wallet\n' +
+    '├ `/untrack 0x...` \\- Stop tracking\n' +
+    '├ `/rename 0x... NewName` \\- Rename wallet\n' +
+    '├ `/list` \\- Show all wallets\n' +
+    '└ `/manage` \\- Wallet manager\n\n' +
+    '📊 *Market Data*\n' +
+    '├ `/markets` \\- Trending markets\n' +
+    '├ `/market id` \\- Market details\n' +
+    '├ `/positions 0x...` \\- Wallet positions\n' +
+    '├ `/orderbook id` \\- Order book\n' +
+    '└ `/analytics 0x...` \\- Wallet stats\n\n' +
+    '🔔 *Notifications*\n' +
+    '├ `/alerts` \\- Manage alerts\n' +
+    '├ `/mute` \\- Pause notifications\n' +
+    '└ `/unmute` \\- Resume notifications\n\n' +
+    '⚙️ *System*\n' +
+    '├ `/settings` \\- Preferences\n' +
+    '└ `/status` \\- Bot health\n\n' +
+    '⚡ *Shortcuts:*\n' +
+    '`/w` → /list \\| `/t` → /track \\| `/p` → /positions',
     { parse_mode: 'MarkdownV2' }
   );
 });
@@ -230,7 +249,7 @@ bot.command('status', async (ctx) => {
   }
 });
 
-bot.command('track', async (ctx) => {
+bot.command(['track', 't'], async (ctx) => {
   const messageText = ctx.message.text;
   const args = messageText.split(' ');
 
@@ -241,18 +260,23 @@ bot.command('track', async (ctx) => {
 
   if (args.length < 2) {
     ctx.reply(
-      '📝 **Track Wallet Usage**\n\n' +
-      'Please provide a wallet address to track:\n' +
-      '`/track 0x1234...` - Track Ethereum wallet\n' +
-      '`/track 9WzDXw...` - Track Solana wallet\n\n' +
-      '💡 Example:\n' +
-      '`/track 0x7845bc5E15bC9c41Be5aC0725E68a16Ec02B51B5`',
-      { parse_mode: 'Markdown' }
+      '📝 *Track Wallet*\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+      '*Usage:*\n' +
+      '`/track <address>` \\- Basic tracking\n' +
+      '`/track <address> <name>` \\- With custom name\n\n' +
+      '*Examples:*\n' +
+      '`/track 0x7845bc5E15bC9c41Be5aC0725E68a16Ec02B51B5`\n' +
+      '`/track 0x7845bc...B51B5 Whale1`\n\n' +
+      '💡 _Adding a name makes it easier to identify\\!_',
+      { parse_mode: 'MarkdownV2' }
     );
     return;
   }
 
   const walletAddress = args[1];
+  // Join remaining args as alias (supports multi-word names)
+  const alias = args.slice(2).join(' ') || undefined;
 
   // Basic validation
   const isEthereumAddress = /^0x[a-fA-F0-9]{40}$/.test(walletAddress);
@@ -293,14 +317,20 @@ bot.command('track', async (ctx) => {
       return;
     }
 
-    // Add wallet to tracking
-    const wallet = await userService.addTrackedWallet(ctx.from.id, walletAddress);
+    // Add wallet to tracking with optional alias
+    const wallet = await userService.addTrackedWallet(ctx.from.id, walletAddress, alias);
 
     if (wallet) {
+      // Update alias if provided
+      if (alias) {
+        await userService.updateWalletAlias(ctx.from.id, walletAddress, alias);
+      }
+
       const addressType = isEthereumAddress ? 'Ethereum' : 'Solana';
       const shortAddress = walletAddress.length > 20 ?
         `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` :
         walletAddress;
+      const displayName = alias || shortAddress;
 
       // Start activity tracking if tracker is available
       let activityTrackingStatus = '';
@@ -308,7 +338,8 @@ bot.command('track', async (ctx) => {
         const trackResult = await walletTracker.startTracking(
           walletAddress,
           ctx.from.id,
-          ctx.chat.id
+          ctx.chat.id,
+          alias
         );
         activityTrackingStatus = trackResult.success
           ? '\n🔔 **Activity Notifications:** Enabled'
@@ -316,17 +347,18 @@ bot.command('track', async (ctx) => {
       }
 
       ctx.reply(
-        `✅ **Wallet Tracking Added**\n\n` +
+        `✅ **Wallet Added**\n\n` +
+        `🏷️ Name: **${displayName}**\n` +
         `📍 Address: \`${shortAddress}\`\n` +
         `🔗 Network: ${addressType}\n` +
-        `📊 Status: Active monitoring\n` +
-        `📅 Added: ${new Date().toLocaleDateString()}` +
+        `📊 Status: Active` +
         activityTrackingStatus + `\n\n` +
-        `🔔 You'll receive notifications for:\n` +
-        `• Buy/Sell position changes\n` +
+        `🔔 You'll get notified on:\n` +
+        `• Position changes (buy/sell)\n` +
         `• New positions opened\n` +
         `• Positions closed\n\n` +
-        `Use /list to see all tracked wallets`,
+        (alias ? '' : `💡 _Tip: Use \`/rename ${shortAddress} YourName\` to add a name_\n\n`) +
+        `Use /list to see all wallets`,
         { parse_mode: 'Markdown' }
       );
 
@@ -344,7 +376,7 @@ bot.command('track', async (ctx) => {
   }
 });
 
-bot.command(['list', 'list_traders', 'wallets'], async (ctx) => {
+bot.command(['list', 'list_traders', 'wallets', 'w'], async (ctx) => {
   if (!ctx.from?.id) {
     ctx.reply('❌ Unable to identify user. Please try again.');
     return;
@@ -355,39 +387,37 @@ bot.command(['list', 'list_traders', 'wallets'], async (ctx) => {
 
     if (userWallets.length === 0) {
       ctx.reply(
-        '📋 **Tracked Wallets**\n\n' +
-        '_No wallets are currently being tracked._\n\n' +
-        '💡 **Getting Started:**\n' +
-        '• Use `/track <address>` to add a wallet\n' +
-        '• Support for Ethereum and Solana addresses\n' +
-        '• Real-time monitoring and alerts\n\n' +
-        'Example: `/track 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0`'
+        '👛 *Your Wallets*\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+        '_No wallets tracked yet\\._\n\n' +
+        '*Get started:*\n' +
+        '`/track 0x... WhaleName`\n\n' +
+        '💡 _Add a name to easily identify your wallets\\!_',
+        { parse_mode: 'MarkdownV2' }
       );
       return;
     }
 
-    let walletList = '📋 **Your Tracked Wallets**\n\n';
+    let walletList = '👛 *Your Wallets*\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━\n\n';
 
     userWallets.forEach((wallet, index) => {
       const shortAddress = wallet.wallet_address.length > 20 ?
         `${wallet.wallet_address.slice(0, 6)}...${wallet.wallet_address.slice(-4)}` :
         wallet.wallet_address;
 
-      const addedDate = new Date(wallet.created_at).toLocaleDateString();
-      const alias = wallet.alias || shortAddress;
+      const displayName = wallet.alias || shortAddress;
+      const status = wallet.is_active ? '🟢' : '🔴';
 
-      walletList += `🔹 **${alias}**\n`;
-      walletList += `   Address: \`${shortAddress}\`\n`;
-      walletList += `   Added: ${addedDate}\n`;
-      walletList += `   Status: ${wallet.is_active ? '🟢 Active' : '🔴 Inactive'}\n\n`;
+      walletList += `${status} *${escapeMarkdownV2(displayName)}*\n`;
+      walletList += `   \`${shortAddress}\`\n\n`;
     });
 
-    walletList += `📊 **Summary:**\n`;
-    walletList += `• Total wallets: ${userWallets.length}\n`;
-    walletList += `• Active monitoring: ${userWallets.filter(w => w.is_active).length}\n\n`;
-    walletList += `💡 Use \`/untrack <address>\` to remove a wallet`;
+    walletList += '━━━━━━━━━━━━━━━━━━━━━━\n';
+    walletList += `📊 ${userWallets.length} wallet${userWallets.length > 1 ? 's' : ''} tracked\n\n`;
+    walletList += '💡 `/manage` for more options';
 
-    ctx.reply(walletList, { parse_mode: 'Markdown' });
+    ctx.reply(walletList, { parse_mode: 'MarkdownV2' });
 
     logger.info(`User ${ctx.from.id} listed ${userWallets.length} tracked wallets`, {
       userId: ctx.from.id,
@@ -466,6 +496,132 @@ bot.command(['untrack', 'remove'], async (ctx) => {
   } catch (error) {
     logger.error('Error in untrack command:', error);
     ctx.reply('❌ An error occurred while removing the wallet. Please try again later.');
+  }
+});
+
+// Rename wallet command
+bot.command('rename', async (ctx) => {
+  const messageText = ctx.message.text;
+  const args = messageText.split(' ');
+
+  if (!ctx.from?.id) {
+    ctx.reply('❌ Unable to identify user. Please try again.');
+    return;
+  }
+
+  if (args.length < 3) {
+    ctx.reply(
+      '🏷️ *Rename Wallet*\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+      '*Usage:*\n' +
+      '`/rename <address> <new_name>`\n\n' +
+      '*Example:*\n' +
+      '`/rename 0x7845bc...B51B5 Whale King`\n\n' +
+      '💡 _Use /list to see your wallet addresses_',
+      { parse_mode: 'MarkdownV2' }
+    );
+    return;
+  }
+
+  const walletAddress = args[1];
+  const newAlias = args.slice(2).join(' ');
+
+  try {
+    // Check if wallet is tracked
+    const isTracked = await userService.isWalletTracked(ctx.from.id, walletAddress);
+    if (!isTracked) {
+      ctx.reply(
+        '❌ **Wallet Not Found**\n\n' +
+        `The address \`${walletAddress}\` is not in your tracking list.\n\n` +
+        'Use `/list` to see your tracked wallets',
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+
+    // Update alias
+    const success = await userService.updateWalletAlias(ctx.from.id, walletAddress, newAlias);
+
+    if (success) {
+      const shortAddress = walletAddress.length > 20 ?
+        `${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}` :
+        walletAddress;
+
+      ctx.reply(
+        `✅ **Wallet Renamed**\n\n` +
+        `🏷️ New name: **${newAlias}**\n` +
+        `📍 Address: \`${shortAddress}\`\n\n` +
+        `Use /list to see all wallets`,
+        { parse_mode: 'Markdown' }
+      );
+
+      logger.info(`User ${ctx.from.id} renamed wallet ${walletAddress} to ${newAlias}`, {
+        userId: ctx.from.id,
+        walletAddress,
+        newAlias
+      });
+    } else {
+      ctx.reply('❌ Failed to rename wallet. Please try again.');
+    }
+  } catch (error) {
+    logger.error('Error in rename command:', error);
+    ctx.reply('❌ An error occurred. Please try again later.');
+  }
+});
+
+// Manage wallets command
+bot.command('manage', async (ctx) => {
+  if (!ctx.from?.id) {
+    ctx.reply('❌ Unable to identify user. Please try again.');
+    return;
+  }
+
+  try {
+    const userWallets = await userService.getUserWallets(ctx.from.id);
+
+    if (userWallets.length === 0) {
+      ctx.reply(
+        '👛 *Wallet Manager*\n' +
+        '━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+        '_No wallets tracked yet\\._\n\n' +
+        '*Get started:*\n' +
+        '`/track 0x... WhaleName`\n\n' +
+        '💡 _Add a name to easily identify your wallets\\!_',
+        { parse_mode: 'MarkdownV2' }
+      );
+      return;
+    }
+
+    let manageMessage = '👛 *Wallet Manager*\n' +
+      '━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+    userWallets.forEach((wallet, index) => {
+      const shortAddress = wallet.wallet_address.length > 20 ?
+        `${wallet.wallet_address.slice(0, 6)}...${wallet.wallet_address.slice(-4)}` :
+        wallet.wallet_address;
+      const displayName = wallet.alias || shortAddress;
+      const status = wallet.is_active ? '🟢' : '🔴';
+
+      manageMessage += `${status} *${index + 1}\\. ${escapeMarkdownV2(displayName)}*\n`;
+      manageMessage += `   \`${shortAddress}\`\n\n`;
+    });
+
+    manageMessage += '━━━━━━━━━━━━━━━━━━━━━━\n';
+    manageMessage += '*Quick Actions:*\n';
+    manageMessage += '• `/rename <addr> <name>` \\- Rename\n';
+    manageMessage += '• `/untrack <addr>` \\- Remove\n';
+    manageMessage += '• `/positions <addr>` \\- View positions\n';
+    manageMessage += '• `/track <addr> [name]` \\- Add new';
+
+    ctx.reply(manageMessage, { parse_mode: 'MarkdownV2' });
+
+    logger.info(`User ${ctx.from.id} opened wallet manager`, {
+      userId: ctx.from.id,
+      walletCount: userWallets.length
+    });
+  } catch (error) {
+    logger.error('Error in manage command:', error);
+    ctx.reply('❌ An error occurred. Please try again later.');
   }
 });
 
@@ -594,7 +750,7 @@ bot.command('market', async (ctx) => {
   }
 });
 
-bot.command('positions', async (ctx) => {
+bot.command(['positions', 'p', 'pos'], async (ctx) => {
   const messageText = ctx.message.text;
   const args = messageText.split(' ');
 
