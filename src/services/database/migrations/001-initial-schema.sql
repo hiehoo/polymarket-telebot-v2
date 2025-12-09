@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS tracked_wallets (
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    last_activity_at TIMESTAMP WITH TIME ZONE
+    last_activity_at TIMESTAMP WITH TIME ZONE,
+    CONSTRAINT tracked_wallets_user_wallet_unique UNIQUE (user_id, wallet_address)
 );
 
 -- Position alerts table for wallet activity notifications

@@ -34,6 +34,8 @@ interface Config {
   notifications: {
     batchSize: number;
     delayMs: number;
+    minOrderValue: number;
+    minPortfolioPercent: number;
   };
   health: {
     checkIntervalMs: number;
@@ -79,6 +81,8 @@ const config: Config = {
   notifications: {
     batchSize: parseInt(process.env['NOTIFICATION_BATCH_SIZE'] || '50', 10),
     delayMs: parseInt(process.env['NOTIFICATION_DELAY_MS'] || '1000', 10),
+    minOrderValue: parseInt(process.env['NOTIFICATION_MIN_ORDER_VALUE'] || '500', 10),
+    minPortfolioPercent: parseFloat(process.env['NOTIFICATION_MIN_PORTFOLIO_PERCENT'] || '2'),
   },
   health: {
     checkIntervalMs: parseInt(process.env['HEALTH_CHECK_INTERVAL_MS'] || '30000', 10),

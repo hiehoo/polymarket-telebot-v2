@@ -449,19 +449,79 @@ export class WalletActivityTracker {
   }
 
   /**
+   * Get total portfolio value for a wallet
+   */
+  private async getWalletPortfolioValue(walletAddress: string): Promise<number> {
+    try {
+      const positions = await this.polymarketService.getWalletPositions(walletAddress, 500);
+      return positions.reduce((sum, p) => sum + (p.shares * (p.entryPrice || 0)), 0);
+    } catch (error) {
+      logger.error('Failed to get wallet portfolio value', {
+        wallet: walletAddress,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return 0;
+    }
+  }
+
+  /**
+   * Check if a position change is significant enough to notify
+   * Significant = $500+ OR 2%+ of portfolio
+   */
+  private async isSignificantChange(
+    change: PositionChange,
+    walletAddress: string
+  ): Promise<boolean> {
+    const minValue = config.notifications.minOrderValue || 500;
+    const minPercent = config.notifications.minPortfolioPercent || 2;
+
+    // Fast path: Large orders always significant
+    if (change.totalValue >= minValue) {
+      return true;
+    }
+
+    // Check portfolio percentage
+    const portfolioValue = await this.getWalletPortfolioValue(walletAddress);
+    if (portfolioValue <= 0) return false;
+
+    const changePercent = (change.totalValue / portfolioValue) * 100;
+    return changePercent >= minPercent;
+  }
+
+  /**
    * Send notifications to all subscribers of a wallet
    * Uses PostgreSQL for subscriber lookup
+   * Only notifies for significant changes ($500+ OR 2%+ portfolio)
    */
   private async notifySubscribers(
     walletAddress: string,
     changes: PositionChange[]
   ): Promise<void> {
     try {
+      // Filter to significant changes only
+      const significantChanges: PositionChange[] = [];
+      for (const change of changes) {
+        if (await this.isSignificantChange(change, walletAddress)) {
+          significantChanges.push(change);
+        } else {
+          logger.debug('Skipping insignificant change', {
+            wallet: walletAddress,
+            value: change.totalValue,
+            type: change.type,
+          });
+        }
+      }
+
+      if (significantChanges.length === 0) {
+        logger.debug('No significant changes to notify', { wallet: walletAddress });
+        return;
+      }
+
       const subscribers = await this.repository.getWalletSubscribers(walletAddress);
 
       for (const subscriber of subscribers) {
         try {
-          for (const change of changes) {
+          for (const change of significantChanges) {
             const displayWallet = subscriber.alias || walletAddress;
             const message = formatNotification(change, displayWallet);
 
